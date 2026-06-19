@@ -1,0 +1,37 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  color: #101828;
+  background: #f5f7fb;
+  font-family:
+    Inter,
+    "PingFang SC",
+    "Microsoft YaHei",
+    Arial,
+    sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.el-card__header {
+  padding: 18px 20px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.el-card__body {
+  padding: 20px;
+}

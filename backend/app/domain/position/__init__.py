@@ -1,0 +1,1 @@
+"""Position domain model."""

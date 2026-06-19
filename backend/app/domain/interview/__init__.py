@@ -1,0 +1,1 @@
+"""Interview domain model."""
