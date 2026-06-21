@@ -5,9 +5,11 @@ import DashboardPage from '@/views/dashboard/DashboardPage.vue'
 import AbilityProfilePage from '@/views/profile/AbilityProfilePage.vue'
 import InterviewHistoryPage from '@/views/history/InterviewHistoryPage.vue'
 import InterviewReportPage from '@/views/report/InterviewReportPage.vue'
+import ResumeProfilePage from '@/views/resume/ResumeProfilePage.vue'
 import MockInterviewPreparePage from '@/views/mock-interview/MockInterviewPreparePage.vue'
 import MockInterviewRoomPage from '@/views/mock-interview/MockInterviewRoomPage.vue'
 import TrainingPage from '@/views/training/TrainingPage.vue'
+import TrainingDetailPage from '@/views/training/TrainingDetailPage.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -22,6 +24,12 @@ const router = createRouter({
           name: 'Dashboard',
           component: DashboardPage,
           meta: { title: '首页概览' },
+        },
+        {
+          path: 'resume',
+          name: 'ResumeProfile',
+          component: ResumeProfilePage,
+          meta: { title: '我的简历' },
         },
         {
           path: 'mock-interview',
@@ -58,6 +66,12 @@ const router = createRouter({
           name: 'Training',
           component: TrainingPage,
           meta: { title: '专项训练' },
+        },
+        {
+          path: 'training/:taskId',
+          name: 'TrainingDetail',
+          component: TrainingDetailPage,
+          meta: { title: '专项训练详情' },
         },
         {
           path: 'interview-history',

@@ -5,6 +5,8 @@ class StartInterviewRequest(BaseModel):
     """Request DTO for creating an interview session."""
 
     job_role: str = Field(..., min_length=1, max_length=100, description="Target job role")
+    direction: str | None = Field("FULL_MOCK", max_length=64, description="Interview direction")
+    interviewer_mode: str | None = Field("NORMAL", max_length=64, description="Interviewer mode")
     resume_text: str | None = Field(None, description="Candidate resume text")
     duration_minutes: int = Field(
         45,
@@ -26,6 +28,8 @@ class InterviewSessionResponse(BaseModel):
 
     session_id: str = Field(..., description="Interview session identifier")
     job_role: str = Field(..., description="Target job role")
+    direction: str | None = Field(None, description="Interview direction")
+    interviewer_mode: str | None = Field(None, description="Interviewer mode")
     status: str = Field(..., description="Interview status")
     current_round: int = Field(..., description="Current interview round")
     duration_minutes: int = Field(..., description="Interview duration limit in minutes")
@@ -46,6 +50,8 @@ class InterviewHistoryItemResponse(BaseModel):
 
     session_id: str
     job_role: str
+    direction: str | None = None
+    interviewer_mode: str | None = None
     status: str
     current_round: int
     message_count: int
@@ -54,7 +60,18 @@ class InterviewHistoryItemResponse(BaseModel):
     started_at: str
     ended_at: str | None = None
     has_report: bool
+    is_valid: bool = True
     overall_score: float | None = None
+
+
+class LatestActiveInterviewResponse(BaseModel):
+    has_active: bool
+    session_id: str | None = None
+    job_role: str | None = None
+    direction: str | None = None
+    interviewer_mode: str | None = None
+    started_at: str | None = None
+    answered_count: int = 0
 
 
 class InterviewReviewRoundResponse(BaseModel):
@@ -100,3 +117,11 @@ class FinishInterviewResponse(BaseModel):
 
     session_id: str = Field(..., description="Interview session identifier")
     is_finished: bool = Field(..., description="Whether the interview has finished")
+
+
+class SuccessResponse(BaseModel):
+    success: bool = True
+
+
+class UpdateInterviewValidityRequest(BaseModel):
+    is_valid: bool

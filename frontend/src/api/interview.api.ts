@@ -2,6 +2,8 @@ import request from './request'
 
 export interface StartInterviewRequest {
   job_role: string
+  direction?: string
+  interviewer_mode?: string
   resume_text?: string
   duration_minutes?: number
 }
@@ -32,6 +34,8 @@ export interface FinishInterviewResponse {
 export interface InterviewSessionResponse {
   session_id: string
   job_role: string
+  direction?: string | null
+  interviewer_mode?: string | null
   status: string
   current_round: number
   duration_minutes: number
@@ -48,6 +52,8 @@ export interface InterviewMessageResponse {
 export interface InterviewHistoryItemResponse {
   session_id: string
   job_role: string
+  direction?: string | null
+  interviewer_mode?: string | null
   status: string
   current_round: number
   message_count: number
@@ -56,7 +62,22 @@ export interface InterviewHistoryItemResponse {
   started_at: string
   ended_at: string | null
   has_report: boolean
+  is_valid: boolean
   overall_score: number | null
+}
+
+export interface LatestActiveInterviewResponse {
+  has_active: boolean
+  session_id?: string | null
+  job_role?: string | null
+  direction?: string | null
+  interviewer_mode?: string | null
+  started_at?: string | null
+  answered_count: number
+}
+
+export interface SuccessResponse {
+  success: boolean
 }
 
 export interface InterviewReviewRoundResponse {
@@ -102,3 +123,14 @@ export const listInterviewHistoryApi = (includeEmpty = false) =>
 
 export const getInterviewReviewApi = (sessionId: string) =>
   request.get<InterviewReviewResponse, InterviewReviewResponse>(`/interview/${sessionId}/review`)
+
+export const getLatestActiveInterviewApi = () =>
+  request.get<LatestActiveInterviewResponse, LatestActiveInterviewResponse>('/interview/latest-active')
+
+export const deleteInterviewApi = (sessionId: string) =>
+  request.delete<SuccessResponse, SuccessResponse>(`/interview/${sessionId}`)
+
+export const updateInterviewValidityApi = (sessionId: string, isValid: boolean) =>
+  request.patch<SuccessResponse, SuccessResponse>(`/interview/${sessionId}/validity`, {
+    is_valid: isValid,
+  })

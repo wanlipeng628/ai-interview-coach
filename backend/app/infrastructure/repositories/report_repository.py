@@ -15,28 +15,32 @@ class SqlAlchemyReportRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def get_by_session_id(self, session_id: str) -> InterviewReport | None:
-        report_model = self._get_report_model(session_id)
+    def get_by_session_id(self, user_id: int, session_id: str) -> InterviewReport | None:
+        report_model = self._get_report_model(user_id, session_id)
         if report_model is None:
             return None
         return self._to_entity(report_model)
 
-    def list_reports(self, limit: int = 20) -> list[InterviewReportListItem]:
+    def list_reports(self, user_id: int, limit: int = 20) -> list[InterviewReportListItem]:
         statement = (
             select(InterviewReportModel)
             .join(InterviewSessionModel, InterviewReportModel.interview_id == InterviewSessionModel.id)
+            .where(
+                InterviewSessionModel.user_id == user_id,
+                InterviewSessionModel.is_deleted.is_(False),
+            )
             .order_by(InterviewReportModel.create_time.desc(), InterviewReportModel.id.desc())
             .limit(limit)
         )
         reports = self.db.execute(statement).scalars().all()
         return [self._to_list_item(report) for report in reports]
 
-    def save(self, report: InterviewReport) -> InterviewReport:
-        interview = self._get_interview_model(report.session_id)
+    def save(self, user_id: int, report: InterviewReport) -> InterviewReport:
+        interview = self._get_interview_model(user_id, report.session_id)
         if interview is None:
             raise ValueError("Interview session not found")
 
-        existing = self._get_report_model(report.session_id)
+        existing = self._get_report_model(user_id, report.session_id)
         if existing is not None:
             return self._to_entity(existing)
 
@@ -55,14 +59,16 @@ class SqlAlchemyReportRepository:
         self.db.refresh(model)
         return self._to_entity(model)
 
-    def _get_interview_model(self, session_id: str) -> InterviewSessionModel | None:
+    def _get_interview_model(self, user_id: int, session_id: str) -> InterviewSessionModel | None:
         statement = select(InterviewSessionModel).where(
-            InterviewSessionModel.session_id == session_id
+            InterviewSessionModel.user_id == user_id,
+            InterviewSessionModel.session_id == session_id,
+            InterviewSessionModel.is_deleted.is_(False),
         )
         return self.db.execute(statement).scalar_one_or_none()
 
-    def _get_report_model(self, session_id: str) -> InterviewReportModel | None:
-        interview = self._get_interview_model(session_id)
+    def _get_report_model(self, user_id: int, session_id: str) -> InterviewReportModel | None:
+        interview = self._get_interview_model(user_id, session_id)
         if interview is None:
             return None
         statement = select(InterviewReportModel).where(

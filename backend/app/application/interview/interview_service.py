@@ -1,23 +1,34 @@
 from datetime import UTC, datetime
+import re
 from uuid import uuid4
 
 from app.application.interview.interview_dto import (
+    LatestActiveInterviewResponse,
     InterviewHistoryItemResponse,
     InterviewMessageResponse,
     InterviewReviewResponse,
     InterviewReviewRoundResponse,
     InterviewSessionResponse,
     FinishInterviewResponse,
+    SuccessResponse,
     SubmitAnswerRequest,
     SubmitAnswerResponse,
     StartInterviewRequest,
     StartInterviewResponse,
+    UpdateInterviewValidityRequest,
 )
 from app.domain.interview.entities import InterviewAnswerReview, InterviewSession
 from app.domain.interview.entities import InterviewSessionStatus
 from app.domain.interview.repositories import InterviewRepository
 from app.domain.interview.services import InterviewQuestionPolicy
 from app.infrastructure.agent.interview_agent import InterviewerAgent
+
+RESUME_CONTEXT_PREFIX = "RESUME_CONTEXT"
+LEGACY_RESUME_PREFIXES = (
+    "候选人简历：",
+    "候选人简历:",
+    "鍊欓€変汉绠€鍘嗭細",
+)
 
 
 class InterviewService:
@@ -32,7 +43,7 @@ class InterviewService:
         self._question_policy = InterviewQuestionPolicy()
         self._interviewer_agent = interviewer_agent
 
-    def start_interview(self, request: StartInterviewRequest) -> StartInterviewResponse:
+    def start_interview(self, user_id: int, request: StartInterviewRequest) -> StartInterviewResponse:
         """Create a new interview session and generate the first question."""
         job_role = request.job_role.strip()
         first_question = self._question_policy.build_first_question(job_role)
@@ -41,17 +52,31 @@ class InterviewService:
             session_id=str(uuid4()),
             job_role=job_role,
             first_question=first_question,
+            user_id=user_id,
             duration_minutes=request.duration_minutes,
+            direction=request.direction,
+            interviewer_mode=request.interviewer_mode,
         )
         self._repository.save(session)
         self._repository.append_message(
+            user_id=user_id,
             session_id=session.session_id,
             role="AI_INTERVIEWER",
             content=first_question,
             round_no=1,
         )
-        if request.resume_text:
+        resume_text = request.resume_text.strip() if request.resume_text else ""
+        if resume_text:
             self._repository.append_message(
+                user_id=user_id,
+                session_id=session.session_id,
+                role="SYSTEM",
+                content=f"{RESUME_CONTEXT_PREFIX}\n{resume_text}",
+                round_no=0,
+            )
+        if False and request.resume_text:
+            self._repository.append_message(
+                user_id=user_id,
                 session_id=session.session_id,
                 role="SYSTEM",
                 content=f"候选人简历：\n{request.resume_text.strip()}",
@@ -65,11 +90,12 @@ class InterviewService:
 
     def submit_answer(
         self,
+        user_id: int,
         session_id: str,
         request: SubmitAnswerRequest,
     ) -> SubmitAnswerResponse:
         """Record candidate answer and generate the next question."""
-        session = self._repository.get_by_id(session_id)
+        session = self._repository.get_by_id(user_id, session_id)
         if session is None:
             raise ValueError("Interview session not found")
         if session.status != InterviewSessionStatus.IN_PROGRESS:
@@ -80,6 +106,7 @@ class InterviewService:
             raise ValueError("Answer cannot be empty")
         round_no = session.current_round
         self._repository.append_message(
+            user_id=user_id,
             session_id=session_id,
             role="USER_CANDIDATE",
             content=answer,
@@ -89,11 +116,12 @@ class InterviewService:
         elapsed_minutes = self._elapsed_minutes(session.created_at)
         if elapsed_minutes >= session.duration_minutes:
             self._repository.save_answer_review(
+                user_id=user_id,
                 session_id=session_id,
                 round_no=round_no,
                 review=self._build_fallback_answer_review(answer),
             )
-            self._repository.finish(session_id)
+            self._repository.finish(user_id, session_id)
             return SubmitAnswerResponse(
                 session_id=session_id,
                 round_no=round_no,
@@ -104,23 +132,26 @@ class InterviewService:
             )
 
         next_round = round_no + 1
-        history = self._repository.list_messages(session_id)
+        history = self._repository.list_messages(user_id, session_id)
         interviewer_agent = self._interviewer_agent or InterviewerAgent()
         decision = interviewer_agent.generate_next_question(
             job_role=session.job_role,
             round_no=next_round,
             duration_minutes=session.duration_minutes,
             elapsed_minutes=elapsed_minutes,
+            direction=session.direction,
+            interviewer_mode=session.interviewer_mode,
             resume_text=self._extract_resume_text(history),
             history=history,
         )
         self._repository.save_answer_review(
+            user_id=user_id,
             session_id=session_id,
             round_no=round_no,
             review=self._to_domain_answer_review(decision.answer_review, answer),
         )
         if decision.decision == "end":
-            self._repository.finish(session_id)
+            self._repository.finish(user_id, session_id)
             return SubmitAnswerResponse(
                 session_id=session_id,
                 round_no=round_no,
@@ -133,14 +164,27 @@ class InterviewService:
         next_question = decision.question
         if not next_question:
             raise RuntimeError("LLM did not return next question")
+        if self._is_repeated_question(next_question, history):
+            regenerated_question = interviewer_agent.regenerate_question_avoiding_history(
+                job_role=session.job_role,
+                direction=session.direction,
+                interviewer_mode=session.interviewer_mode,
+                duplicated_question=next_question,
+                history=history,
+            )
+            if regenerated_question and not self._is_repeated_question(regenerated_question, history):
+                next_question = regenerated_question
+            else:
+                next_question = self._build_non_repeated_question(session.direction, history)
 
         self._repository.append_message(
+            user_id=user_id,
             session_id=session_id,
             role="AI_INTERVIEWER",
             content=next_question,
             round_no=next_round,
         )
-        self._repository.advance_round(session_id, next_round)
+        self._repository.advance_round(user_id, session_id, next_round)
 
         return SubmitAnswerResponse(
             session_id=session_id,
@@ -151,32 +195,34 @@ class InterviewService:
             reason=decision.reason,
         )
 
-    def finish_interview(self, session_id: str) -> FinishInterviewResponse:
-        session = self._repository.get_by_id(session_id)
+    def finish_interview(self, user_id: int, session_id: str) -> FinishInterviewResponse:
+        session = self._repository.get_by_id(user_id, session_id)
         if session is None:
             raise ValueError("Interview session not found")
 
         if session.status == InterviewSessionStatus.IN_PROGRESS:
-            self._repository.finish(session_id)
+            self._repository.finish(user_id, session_id)
 
         return FinishInterviewResponse(session_id=session_id, is_finished=True)
 
-    def get_session(self, session_id: str) -> InterviewSessionResponse | None:
-        session = self._repository.get_by_id(session_id)
+    def get_session(self, user_id: int, session_id: str) -> InterviewSessionResponse | None:
+        session = self._repository.get_by_id(user_id, session_id)
         if session is None:
             return None
 
         return InterviewSessionResponse(
             session_id=session.session_id,
             job_role=session.job_role,
+            direction=session.direction,
+            interviewer_mode=session.interviewer_mode,
             status=session.status.value,
             current_round=session.current_round,
             duration_minutes=session.duration_minutes,
             started_at=session.created_at.isoformat(),
         )
 
-    def list_messages(self, session_id: str) -> list[InterviewMessageResponse]:
-        messages = self._repository.list_messages_detailed(session_id)
+    def list_messages(self, user_id: int, session_id: str) -> list[InterviewMessageResponse]:
+        messages = self._repository.list_messages_detailed(user_id, session_id)
         return [
             InterviewMessageResponse(
                 role=str(message["role"]),
@@ -187,12 +233,14 @@ class InterviewService:
             for message in messages
         ]
 
-    def list_history(self, include_empty: bool = False) -> list[InterviewHistoryItemResponse]:
-        rows = self._repository.list_history(include_empty=include_empty)
+    def list_history(self, user_id: int, include_empty: bool = False) -> list[InterviewHistoryItemResponse]:
+        rows = self._repository.list_history(user_id=user_id, include_empty=include_empty)
         return [
             InterviewHistoryItemResponse(
                 session_id=str(row["session_id"]),
                 job_role=str(row["job_role"]),
+                direction=str(row["direction"]) if row.get("direction") else None,
+                interviewer_mode=str(row["interviewer_mode"]) if row.get("interviewer_mode") else None,
                 status=str(row["status"]),
                 current_round=int(row["current_round"]),
                 message_count=int(row["message_count"]),
@@ -201,18 +249,46 @@ class InterviewService:
                 started_at=str(row["started_at"]),
                 ended_at=str(row["ended_at"]) if row["ended_at"] else None,
                 has_report=bool(row["has_report"]),
+                is_valid=bool(row["is_valid"]),
                 overall_score=float(row["overall_score"]) if row["overall_score"] is not None else None,
             )
             for row in rows
         ]
 
-    def get_review(self, session_id: str) -> InterviewReviewResponse | None:
-        session = self._repository.get_by_id(session_id)
+    def get_latest_active(self, user_id: int) -> LatestActiveInterviewResponse:
+        active = self._repository.get_latest_active(user_id)
+        if active is None:
+            return LatestActiveInterviewResponse(has_active=False)
+        return LatestActiveInterviewResponse(
+            has_active=True,
+            session_id=str(active["session_id"]),
+            job_role=str(active["job_role"]),
+            direction=str(active["direction"]) if active.get("direction") else None,
+            interviewer_mode=str(active["interviewer_mode"]) if active.get("interviewer_mode") else None,
+            started_at=str(active["started_at"]),
+            answered_count=int(active["answered_count"] or 0),
+        )
+
+    def delete_interview(self, user_id: int, session_id: str) -> SuccessResponse:
+        self._repository.soft_delete(user_id, session_id)
+        return SuccessResponse(success=True)
+
+    def update_validity(
+        self,
+        user_id: int,
+        session_id: str,
+        request: UpdateInterviewValidityRequest,
+    ) -> SuccessResponse:
+        self._repository.update_validity(user_id, session_id, request.is_valid)
+        return SuccessResponse(success=True)
+
+    def get_review(self, user_id: int, session_id: str) -> InterviewReviewResponse | None:
+        session = self._repository.get_by_id(user_id, session_id)
         if session is None:
             return None
 
-        messages = self._repository.list_messages_detailed(session_id)
-        history_rows = self._repository.list_history(include_empty=True)
+        messages = self._repository.list_messages_detailed(user_id, session_id)
+        history_rows = self._repository.list_history(user_id=user_id, include_empty=True)
         current_history = next(
             (item for item in history_rows if item.get("session_id") == session_id),
             None,
@@ -223,7 +299,7 @@ class InterviewService:
             if item.get("role") == "AI_INTERVIEWER"
         }
         answers = [item for item in messages if item.get("role") == "USER_CANDIDATE"]
-        answer_reviews = self._repository.list_answer_reviews(session_id)
+        answer_reviews = self._repository.list_answer_reviews(user_id, session_id)
         rounds: list[InterviewReviewRoundResponse] = []
         for answer in answers:
             answer_round_no = int(answer["round_no"])
@@ -264,6 +340,25 @@ class InterviewService:
 
     def _extract_resume_text(self, history: list[dict[str, str]]) -> str | None:
         for item in history:
+            if item.get("role") != "SYSTEM":
+                continue
+
+            content = item.get("content", "").strip()
+            if not content:
+                continue
+
+            if content.startswith(RESUME_CONTEXT_PREFIX):
+                return content.removeprefix(RESUME_CONTEXT_PREFIX).strip()
+
+            for prefix in LEGACY_RESUME_PREFIXES:
+                if content.startswith(prefix):
+                    return content.removeprefix(prefix).strip()
+
+            if int(item.get("round_no", -1) or -1) == 0:
+                return content
+        return None
+
+        for item in history:
             if item.get("role") == "SYSTEM" and item.get("content", "").startswith("候选人简历："):
                 return item["content"].removeprefix("候选人简历：").strip()
         return None
@@ -275,6 +370,90 @@ class InterviewService:
         if length >= 60:
             return "normal"
         return "weak"
+
+    def _is_repeated_question(self, question: str, history: list[dict[str, str]]) -> bool:
+        normalized_question = self._normalize_question_text(question)
+        if not normalized_question:
+            return False
+
+        for item in history:
+            if item.get("role") != "AI_INTERVIEWER":
+                continue
+            previous_question = self._normalize_question_text(item.get("content", ""))
+            if not previous_question:
+                continue
+            if normalized_question == previous_question:
+                return True
+            similarity = self._text_similarity(normalized_question, previous_question)
+            if similarity >= 0.72:
+                return True
+        return False
+
+    def _build_non_repeated_question(
+        self,
+        direction: str | None,
+        history: list[dict[str, str]],
+    ) -> str:
+        candidates_by_direction = {
+            "JAVA_BASIC": [
+                "你能讲一下 HashMap 在 JDK 1.8 中 put 一个元素的大致过程吗？",
+                "你能说一下 equals 和 hashCode 为什么通常需要一起重写吗？",
+                "你能讲一下 ArrayList 扩容的大致机制吗？",
+            ],
+            "JVM": [
+                "你能讲一下 JVM 运行时内存区域里堆和方法区分别存放什么吗？",
+                "如果线上出现频繁 Full GC，你会先看哪些指标？",
+            ],
+            "MYSQL": [
+                "你能结合一个查询场景讲一下索引为什么会失效吗？",
+                "你能说明一下事务隔离级别解决了哪些典型问题吗？",
+            ],
+            "REDIS": [
+                "你能讲一下缓存击穿通常怎么解决吗？",
+                "你能说明一下 Redis 分布式锁需要注意哪些失效场景吗？",
+            ],
+            "CONCURRENCY": [
+                "你能讲一下线程池核心参数分别控制什么吗？",
+                "你能说明一下 volatile 适合解决什么问题，不适合解决什么问题吗？",
+            ],
+            "SPRING": [
+                "你能讲一下 Spring Bean 的生命周期里几个关键阶段吗？",
+                "你能说明一下 Spring 事务失效的常见原因吗？",
+            ],
+            "SYSTEM_DESIGN": [
+                "如果让你设计一个高并发下单接口，你会先考虑哪些关键点？",
+                "你能讲一下接口幂等通常有哪些实现方式吗？",
+            ],
+            "TROUBLESHOOTING": [
+                "如果线上接口突然变慢，你会按照什么顺序排查？",
+                "如果应用 CPU 突然飙高，你会怎么定位问题？",
+            ],
+        }
+        candidates = candidates_by_direction.get(direction or "", []) + [
+            "请你讲一个项目中真实遇到的技术问题，以及你当时的排查和解决过程？",
+            "你能选择一个你熟悉的技术点，讲清楚它的使用场景和一个容易踩坑的地方吗？",
+        ]
+        for candidate in candidates:
+            if not self._is_repeated_question(candidate, history):
+                return candidate
+        return "请你换一个项目案例，讲讲其中一个你负责解决的技术问题？"
+
+    def _normalize_question_text(self, text: str) -> str:
+        normalized = re.sub(r"\s+", "", text.lower())
+        normalized = re.sub(r"[，。！？、；：,.!?;:\"'（）()【】\[\]《》<>]", "", normalized)
+        return normalized
+
+    def _text_similarity(self, left: str, right: str) -> float:
+        left_tokens = set(self._tokenize_question(left))
+        right_tokens = set(self._tokenize_question(right))
+        if not left_tokens or not right_tokens:
+            return 0
+        return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+    def _tokenize_question(self, text: str) -> list[str]:
+        if not text:
+            return []
+        return [text[index : index + 2] for index in range(max(len(text) - 1, 1))]
 
     def _to_domain_answer_review(
         self,

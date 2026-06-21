@@ -3,30 +3,61 @@
     <header class="page-header">
       <div>
         <p>专项训练</p>
-        <h1>针对薄弱点的训练计划</h1>
+        <h1>针对薄弱点的训练清单</h1>
       </div>
-      <el-button type="primary">生成今日计划</el-button>
+      <el-button :loading="training.loading" type="primary" @click="training.fetchTasks()">
+        刷新任务
+      </el-button>
     </header>
 
-    <section class="grid">
-      <TrainingPlanCard :plan="training.plan" />
-      <ChartCard title="训练完成度">
-        <BarProgressChart :data="training.topics" />
-      </ChartCard>
-    </section>
+    <el-alert
+      v-if="training.errorMessage"
+      :title="training.errorMessage"
+      type="error"
+      show-icon
+      :closable="false"
+    />
 
-    <TrainingTopicList :topics="training.topics" />
+    <TrainingPlanCard :plan="training.plan" />
+
+    <TrainingTopicList
+      :tasks="training.tasks"
+      @status="handleStatusChange"
+      @start="handleStart"
+      @open-report="handleOpenReport"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import BarProgressChart from '@/components/charts/BarProgressChart.vue'
-import ChartCard from '@/components/dashboard/ChartCard.vue'
+import { onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+
 import TrainingPlanCard from '@/components/training/TrainingPlanCard.vue'
 import TrainingTopicList from '@/components/training/TrainingTopicList.vue'
 import { useTrainingStore } from '@/stores/training.store'
+import type { TrainingTask } from '@/types/training'
 
+const router = useRouter()
 const training = useTrainingStore()
+
+const handleStatusChange = async (taskId: number, status: TrainingTask['status']) => {
+  await training.updateTaskStatus(taskId, status)
+  ElMessage.success('训练状态已更新')
+}
+
+const handleStart = (taskId: number) => {
+  router.push(`/training/${taskId}`)
+}
+
+const handleOpenReport = (sessionId: string) => {
+  router.push(`/report/${sessionId}`)
+}
+
+onMounted(() => {
+  training.fetchTasks()
+})
 </script>
 
 <style scoped lang="scss">
@@ -53,18 +84,6 @@ const training = useTrainingStore()
   h1 {
     margin: 0;
     font-size: 24px;
-  }
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: minmax(320px, 0.8fr) minmax(0, 1.2fr);
-  gap: 18px;
-}
-
-@media (max-width: 1080px) {
-  .grid {
-    grid-template-columns: 1fr;
   }
 }
 </style>

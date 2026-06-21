@@ -30,16 +30,21 @@ class InterviewerAgent:
 你是一名资深 Java 后端技术面试官，也是一名面试陪练教练。你正在进行一场真实、互动、训练型的模拟面试。
 
 目标：
-1. 面试过程像真实面试，候选人只看到面试官的问题。
+1. 面试过程要像真实技术面试，候选人只能看到面试官的问题。
 2. 每轮根据候选人的上一轮回答决定继续追问、切换方向或结束面试。
 3. 同时为系统内部生成上一轮回答复盘，但复盘绝不能出现在 question 字段里。
 
 面试方式：
 1. 开始阶段优先围绕候选人的自我介绍、简历、项目经历追问。
-2. 中段围绕 Java 岗位核心能力考察，包括 Java 基础、集合、并发、JVM、Spring、MySQL、Redis、消息队列、系统设计、线上问题排查。
-3. 如果回答有价值，优先基于回答中最关键的一个点继续追问。
-4. 如果候选人明显答不上来、含糊、重复、明确说不会，就切换到新方向，不要反复追打同一知识点。
-5. 信息已经足够，或接近面试时长上限时，可以结束面试。
+2. 中段围绕 Java 后端岗位核心能力考察。考察范围包括但不限于：Java 语言基础、集合与数据结构、并发编程、JVM、Spring 生态、MySQL 与数据库设计、Redis 与缓存、消息队列、微服务与分布式、接口设计、系统设计、线上问题排查、工程实践、Linux/部署/监控、安全、计算机网络与操作系统基础、架构与业务理解。
+3. 上述方向不是固定清单，不要求每场全部覆盖。你需要根据候选人的简历、自我介绍、上一轮回答质量、岗位方向和剩余时间，动态选择最合适的方向。
+4. 如果候选人简历明显偏业务开发，优先问项目、Spring、数据库、缓存、接口设计、线上问题。
+5. 如果候选人简历体现高并发或中间件经验，可以深入并发、MQ、Redis、系统设计、稳定性治理。
+6. 如果候选人年限较低，优先考察 Java 基础、集合、Spring、MySQL、项目表达。
+7. 如果候选人年限较高，增加架构设计、分布式、稳定性、技术选型、线上治理和复杂度权衡。
+8. 如果回答有价值，优先基于回答中最关键的一个点继续追问。
+9. 如果候选人明显答不上来、含糊、重复、明确说不会，就切换到新方向，不要反复追打同一知识点。
+10. 信息已经足够，或接近面试时长上限时，可以结束面试。
 
 难度控制：
 1. 从简历、自我介绍和项目描述中推断候选人大致工作年限。
@@ -54,6 +59,7 @@ class InterviewerAgent:
 4. 不要使用“分别说说、另外、还有、同时、比如 A/B/C、从实现和原理两个方面”等方式拼接多个问题。
 5. 不要让候选人同时回答实现、原理、优化、排查、对比多个方向。
 6. 如果要深入，只选择候选人回答里最关键的一个点继续问。
+7. 不要重复历史中已经问过的问题，也不要换一种说法重复考察同一个知识点。
 
 隐藏复盘规则：
 1. answer_review 只用于系统记录，候选人在面试过程中看不到。
@@ -69,7 +75,7 @@ class InterviewerAgent:
   "reason": "简短说明为什么继续、切换或结束",
   "answer_review": {
     "evaluation": "对候选人上一轮回答的简短复盘",
-    "reference_points": ["上一轮问题的参考要点1", "参考要点2", "参考要点3"],
+    "reference_points": ["上一轮问题的参考要点", "参考要点", "参考要点"],
     "sample_answer": "上一轮问题的一段参考回答",
     "level": "good|normal|weak"
   }
@@ -77,12 +83,12 @@ class InterviewerAgent:
 """.strip()
 
     REVIEW_LEAK_PATTERNS = [
-        r"^你刚才的?回答[^，。！？?]*[，。！？?]\s*",
-        r"^刚才的?回答[^，。！？?]*[，。！？?]\s*",
-        r"^从你的?回答来看[^，。！？?]*[，。！？?]\s*",
-        r"^这个点[^，。！？?]*[，。！？?]\s*",
-        r"^这里[^，。！？?]*[，。！？?]\s*",
-        r"^建议你[^，。！？?]*[，。！？?]\s*",
+        r"^你刚才的?回答[^，。！？!?]*[，。！？!?]\s*",
+        r"^刚才的?回答[^，。！？!?]*[，。！？!?]\s*",
+        r"^从你的?回答来看[^，。！？!?]*[，。！？!?]\s*",
+        r"^这个点[^，。！？!?]*[，。！？!?]\s*",
+        r"^这里[^，。！？!?]*[，。！？!?]\s*",
+        r"^建议你[^，。！？!?]*[，。！？!?]\s*",
     ]
 
     def __init__(self, llm_client: OpenAICompatibleClient | None = None) -> None:
@@ -94,6 +100,8 @@ class InterviewerAgent:
         round_no: int,
         duration_minutes: int,
         elapsed_minutes: int,
+        direction: str | None,
+        interviewer_mode: str | None,
         resume_text: str | None,
         history: list[dict[str, str]],
     ) -> InterviewerDecision:
@@ -105,6 +113,8 @@ class InterviewerAgent:
                 "content": (
                     f"面试岗位：{job_role}\n"
                     f"当前准备生成的问题轮次：第 {round_no} 轮\n"
+                    f"面试方向：{direction or 'FULL_MOCK'}\n"
+                    f"面试官模式：{interviewer_mode or 'NORMAL'}\n"
                     f"面试时长上限：{duration_minutes} 分钟\n"
                     f"已进行时间：约 {elapsed_minutes} 分钟\n"
                     f"候选人简历：\n{resume_text or '未提供简历'}\n\n"
@@ -119,6 +129,46 @@ class InterviewerAgent:
         content = self._llm_client.chat(messages)
         return self._parse_decision(content, latest_answer=latest_answer)
 
+    def regenerate_question_avoiding_history(
+        self,
+        job_role: str,
+        direction: str | None,
+        interviewer_mode: str | None,
+        duplicated_question: str,
+        history: list[dict[str, str]],
+    ) -> str | None:
+        asked_questions = [
+            item.get("content", "").strip()
+            for item in history
+            if item.get("role") == "AI_INTERVIEWER" and item.get("content", "").strip()
+        ]
+        messages = [
+            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    "你刚才生成的问题与历史问题重复或高度相似，需要重新生成一个新的面试问题。\n"
+                    f"面试岗位：{job_role}\n"
+                    f"面试方向：{direction or 'FULL_MOCK'}\n"
+                    f"面试官模式：{interviewer_mode or 'NORMAL'}\n"
+                    f"重复的问题：{duplicated_question}\n\n"
+                    "已经问过的问题：\n"
+                    f"{self._format_asked_questions(asked_questions)}\n\n"
+                    "要求：\n"
+                    "1. 新问题必须避开所有已经问过的问题和相同知识点。\n"
+                    "2. 新问题仍然要符合当前候选人的简历、项目经历、最近回答和面试方向。\n"
+                    "3. 只问一个单一问题，不要评价候选人，不要给答案。\n"
+                    "4. 只输出严格 JSON：{\"question\":\"新的单一问题\"}"
+                ),
+            },
+        ]
+        content = self._llm_client.chat(messages)
+        try:
+            payload = json.loads(self._extract_json(content))
+        except json.JSONDecodeError:
+            return self._sanitize_question(content) or None
+        return self._sanitize_question(str(payload.get("question") or "")) or None
+
     def _format_history(self, history: list[dict[str, str]]) -> str:
         if not history:
             return "暂无历史问答。"
@@ -130,6 +180,11 @@ class InterviewerAgent:
             round_no = item.get("round_no", "")
             lines.append(f"[{role}][round={round_no}] {content}")
         return "\n".join(lines)
+
+    def _format_asked_questions(self, questions: list[str]) -> str:
+        if not questions:
+            return "暂无已问问题。"
+        return "\n".join(f"{index + 1}. {question}" for index, question in enumerate(questions[-20:]))
 
     def _parse_decision(self, content: str, latest_answer: str | None) -> InterviewerDecision:
         try:
@@ -198,7 +253,7 @@ class InterviewerAgent:
 
         level = self._estimate_answer_level(latest_answer)
         if level == "good":
-            evaluation = "回答信息量较充分，能够展开说明背景、方案或结果。后续可继续补充关键指标、异常场景和方案取舍。"
+            evaluation = "回答信息量较充分，能够展开说明背景、方案或结果。后续可以继续补充关键指标、异常场景和方案取舍。"
         elif level == "normal":
             evaluation = "回答具备一定信息量，但结构和技术细节还可以加强。建议按背景、方案、结果、反思展开。"
         else:
@@ -237,7 +292,7 @@ class InterviewerAgent:
             if 0 <= index <= 8:
                 split_indexes = [
                     question.find(mark)
-                    for mark in ("，", "。", "！", "；", ",", "!", ";")
+                    for mark in ("，", "。", "？", "！", ",", "!", ";")
                     if question.find(mark) >= 0
                 ]
                 if split_indexes:

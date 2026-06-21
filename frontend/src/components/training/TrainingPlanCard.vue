@@ -5,9 +5,8 @@
     <span>{{ plan.description }}</span>
     <div class="meta">
       <strong>{{ plan.estimatedTime }}</strong>
-      <strong>{{ plan.topics }} 个主题</strong>
+      <strong>{{ plan.topics }} 个任务</strong>
     </div>
-    <el-button type="primary" size="large">开始训练</el-button>
   </el-card>
 </template>
 
@@ -43,6 +42,6 @@ span {
 .meta {
   display: flex;
   gap: 18px;
-  margin: 22px 0;
+  margin-top: 22px;
 }
 </style>

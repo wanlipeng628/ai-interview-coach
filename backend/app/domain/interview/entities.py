@@ -18,10 +18,15 @@ class InterviewSession:
     session_id: str
     job_role: str
     first_question: str
+    user_id: int = 1
     status: InterviewSessionStatus = InterviewSessionStatus.IN_PROGRESS
     current_round: int = 1
     max_rounds: int = 999
     duration_minutes: int = 45
+    direction: str | None = None
+    interviewer_mode: str | None = None
+    is_deleted: bool = False
+    is_valid: bool = True
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod
@@ -30,13 +35,19 @@ class InterviewSession:
         session_id: str,
         job_role: str,
         first_question: str,
+        user_id: int = 1,
         duration_minutes: int = 45,
+        direction: str | None = None,
+        interviewer_mode: str | None = None,
     ) -> "InterviewSession":
         return cls(
             session_id=session_id,
             job_role=job_role,
             first_question=first_question,
+            user_id=user_id,
             duration_minutes=duration_minutes,
+            direction=direction,
+            interviewer_mode=interviewer_mode,
         )
 
 

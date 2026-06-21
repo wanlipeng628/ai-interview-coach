@@ -18,10 +18,22 @@ export interface AnsweredQuestion {
 export interface InterviewInfo {
   sessionId: string
   jobRole: string
+  direction?: string | null
+  interviewerMode?: string | null
   currentQuestionNo: number
   totalQuestions: number
   durationLimitMinutes: number
   startedAt: number
   durationSeconds: number
   status: 'in_progress' | 'finished'
+}
+
+export interface LatestActiveInterview {
+  hasActive: boolean
+  sessionId?: string | null
+  jobRole?: string | null
+  direction?: string | null
+  interviewerMode?: string | null
+  startedAt?: string | null
+  answeredCount: number
 }

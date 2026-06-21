@@ -29,6 +29,8 @@
       @detail="handleDetail"
       @continue="handleContinue"
       @report="handleReport"
+      @delete="handleDelete"
+      @validity="handleValidity"
     />
 
     <InterviewReviewDrawer
@@ -43,6 +45,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 import LineTrendChart from '@/components/charts/LineTrendChart.vue'
 import ChartCard from '@/components/dashboard/ChartCard.vue'
@@ -70,6 +73,19 @@ const handleContinue = (sessionId: string) => {
 
 const handleReport = (sessionId: string) => {
   router.push(`/report/${sessionId}`)
+}
+
+const handleDelete = async (sessionId: string) => {
+  await ElMessageBox.confirm('确认删除这条面试记录吗？删除后不会在历史列表展示。', '删除确认', {
+    type: 'warning',
+  })
+  await history.deleteRecord(sessionId)
+  ElMessage.success('面试记录已删除')
+}
+
+const handleValidity = async (sessionId: string, isValid: boolean) => {
+  await history.updateValidity(sessionId, isValid)
+  ElMessage.success(isValid ? '已标记为有效记录' : '已标记为无效记录')
 }
 
 onMounted(() => {

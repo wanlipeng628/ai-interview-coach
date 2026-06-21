@@ -3,35 +3,48 @@ import { defineStore } from 'pinia'
 import {
   finishInterviewApi,
   getInterviewSessionApi,
+  getLatestActiveInterviewApi,
   listInterviewMessagesApi,
   startInterviewApi,
   submitAnswerApi,
 } from '@/api/interview.api'
-import type { AnsweredQuestion, InterviewInfo, InterviewMessage, InterviewRole } from '@/types/interview'
+import type {
+  AnsweredQuestion,
+  InterviewInfo,
+  InterviewMessage,
+  InterviewRole,
+  LatestActiveInterview,
+} from '@/types/interview'
 
 interface InterviewState {
   info: InterviewInfo
   messages: InterviewMessage[]
   answeredQuestions: AnsweredQuestion[]
+  latestActive: LatestActiveInterview | null
   isStreaming: boolean
   loading: boolean
   generating: boolean
   errorMessage: string
 }
 
-const finishMessage = '本次模拟面试已结束，稍后可进入复盘报告查看整体评分、薄弱知识点和训练建议。'
-
 interface StartInterviewOptions {
   jobRole?: string
   durationMinutes?: number
   resumeText?: string
+  direction?: string
+  interviewerMode?: string
 }
+
+const finishMessage =
+  '本次模拟面试已经结束，稍后可以进入复盘报告查看整体评分、薄弱知识点和训练建议。'
 
 export const useInterviewStore = defineStore('interview', {
   state: (): InterviewState => ({
     info: {
       sessionId: 'demo-session',
       jobRole: 'Java开发工程师',
+      direction: 'FULL_MOCK',
+      interviewerMode: 'NORMAL',
       currentQuestionNo: 1,
       totalQuestions: 999,
       durationLimitMinutes: 45,
@@ -50,6 +63,7 @@ export const useInterviewStore = defineStore('interview', {
       },
     ],
     answeredQuestions: [],
+    latestActive: null,
     isStreaming: false,
     loading: false,
     generating: false,
@@ -62,6 +76,19 @@ export const useInterviewStore = defineStore('interview', {
   },
 
   actions: {
+    async fetchLatestActive() {
+      const response = await getLatestActiveInterviewApi()
+      this.latestActive = {
+        hasActive: response.has_active,
+        sessionId: response.session_id,
+        jobRole: response.job_role,
+        direction: response.direction,
+        interviewerMode: response.interviewer_mode,
+        startedAt: response.started_at,
+        answeredCount: response.answered_count,
+      }
+    },
+
     async startInterview(options: StartInterviewOptions | string = {}) {
       if (this.loading) return
       this.loading = true
@@ -69,16 +96,22 @@ export const useInterviewStore = defineStore('interview', {
       const normalizedOptions = typeof options === 'string' ? { jobRole: options } : options
       const jobRole = normalizedOptions.jobRole?.trim() || 'Java开发工程师'
       const durationMinutes = normalizedOptions.durationMinutes ?? 45
+      const direction = normalizedOptions.direction ?? 'FULL_MOCK'
+      const interviewerMode = normalizedOptions.interviewerMode ?? 'NORMAL'
 
       try {
         const response = await startInterviewApi({
           job_role: jobRole,
+          direction,
+          interviewer_mode: interviewerMode,
           duration_minutes: durationMinutes,
           resume_text: normalizedOptions.resumeText?.trim() || undefined,
         })
         this.info = {
           sessionId: response.session_id,
           jobRole,
+          direction,
+          interviewerMode,
           currentQuestionNo: 1,
           totalQuestions: 999,
           durationLimitMinutes: durationMinutes,
@@ -113,6 +146,8 @@ export const useInterviewStore = defineStore('interview', {
         this.info = {
           sessionId: session.session_id,
           jobRole: session.job_role,
+          direction: session.direction,
+          interviewerMode: session.interviewer_mode,
           currentQuestionNo: session.current_round,
           totalQuestions: 999,
           durationLimitMinutes: session.duration_minutes,

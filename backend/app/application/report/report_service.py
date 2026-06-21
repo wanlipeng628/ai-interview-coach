@@ -3,6 +3,7 @@ from app.domain.interview.repositories import InterviewRepository
 from app.domain.report.entities import InterviewReport
 from app.domain.report.repositories import ReportRepository
 from app.infrastructure.agent.report_agent import ReportAgent
+from app.infrastructure.repositories.training_repository import TrainingRepository
 
 
 class ReportService:
@@ -12,18 +13,20 @@ class ReportService:
         self,
         report_repository: ReportRepository,
         interview_repository: InterviewRepository,
+        training_repository: TrainingRepository | None = None,
         report_agent: ReportAgent | None = None,
     ) -> None:
         self._report_repository = report_repository
         self._interview_repository = interview_repository
+        self._training_repository = training_repository
         self._report_agent = report_agent
 
-    def get_report(self, session_id: str) -> InterviewReportResponse | None:
-        report = self._report_repository.get_by_session_id(session_id)
+    def get_report(self, user_id: int, session_id: str) -> InterviewReportResponse | None:
+        report = self._report_repository.get_by_session_id(user_id, session_id)
         return self._to_response(report) if report else None
 
-    def list_reports(self, limit: int = 20) -> list[InterviewReportListItemResponse]:
-        reports = self._report_repository.list_reports(limit=limit)
+    def list_reports(self, user_id: int, limit: int = 20) -> list[InterviewReportListItemResponse]:
+        reports = self._report_repository.list_reports(user_id=user_id, limit=limit)
         return [
             InterviewReportListItemResponse(
                 session_id=report.session_id,
@@ -36,16 +39,16 @@ class ReportService:
             for report in reports
         ]
 
-    def generate_report(self, session_id: str) -> InterviewReportResponse:
-        existing = self._report_repository.get_by_session_id(session_id)
+    def generate_report(self, user_id: int, session_id: str) -> InterviewReportResponse:
+        existing = self._report_repository.get_by_session_id(user_id, session_id)
         if existing is not None:
             return self._to_response(existing)
 
-        interview = self._interview_repository.get_by_id(session_id)
+        interview = self._interview_repository.get_by_id(user_id, session_id)
         if interview is None:
             raise ValueError("Interview session not found")
 
-        messages = self._interview_repository.list_messages(session_id)
+        messages = self._interview_repository.list_messages(user_id, session_id)
         if len(messages) < 2:
             raise ValueError("Not enough interview messages to generate report")
 
@@ -55,7 +58,14 @@ class ReportService:
             job_role=interview.job_role,
             messages=messages,
         )
-        saved_report = self._report_repository.save(report)
+        saved_report = self._report_repository.save(user_id, report)
+        if self._training_repository is not None:
+            training_items = [*saved_report.recommended_training, *saved_report.weakness_points]
+            self._training_repository.upsert_from_report_items(
+                user_id=user_id,
+                source_session_id=session_id,
+                items=training_items,
+            )
         return self._to_response(saved_report)
 
     def _to_response(self, report: InterviewReport) -> InterviewReportResponse:

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,6 +14,7 @@ class InterviewSessionModel(BaseModel):
     __table_args__ = (
         Index("idx_interview_sessions_status", "status"),
         Index("idx_interview_sessions_position_id", "position_id"),
+        Index("idx_interview_sessions_user_id", "user_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -29,7 +30,20 @@ class InterviewSessionModel(BaseModel):
         nullable=True,
         comment="岗位ID，MVP可为空并仅使用job_role",
     )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id"),
+        nullable=False,
+        default=1,
+        comment="用户ID",
+    )
     job_role: Mapped[str] = mapped_column(String(128), nullable=False, comment="面试岗位")
+    direction: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="面试方向")
+    interviewer_mode: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="面试官模式",
+    )
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
@@ -59,7 +73,20 @@ class InterviewSessionModel(BaseModel):
         nullable=True,
         comment="结束时间",
     )
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="是否软删除",
+    )
+    is_valid: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        comment="是否作为有效训练记录",
+    )
 
+    user = relationship("UserModel", back_populates="interviews")
     position = relationship("PositionModel", back_populates="interviews")
     messages = relationship(
         "InterviewMessageModel",

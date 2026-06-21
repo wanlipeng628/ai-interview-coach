@@ -1,6 +1,8 @@
 export interface HistoryRecord {
   sessionId: string
   jobRole: string
+  direction?: string | null
+  interviewerMode?: string | null
   status: string
   statusText: string
   currentRound: number
@@ -10,6 +12,7 @@ export interface HistoryRecord {
   startedAt: string
   endedAt: string | null
   hasReport: boolean
+  isValid: boolean
   overallScore: number | null
 }
 

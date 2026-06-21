@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
 
-import { getInterviewReviewApi, listInterviewHistoryApi } from '@/api/interview.api'
+import {
+  deleteInterviewApi,
+  getInterviewReviewApi,
+  listInterviewHistoryApi,
+  updateInterviewValidityApi,
+} from '@/api/interview.api'
 import type { TrendPoint } from '@/types/dashboard'
 import type { HistoryRecord, InterviewReview } from '@/types/history'
 
@@ -23,6 +28,8 @@ export const useHistoryStore = defineStore('history', {
         this.records = list.map((item) => ({
           sessionId: item.session_id,
           jobRole: item.job_role,
+          direction: item.direction,
+          interviewerMode: item.interviewer_mode,
           status: item.status,
           statusText: getStatusText(item.status, item.has_report),
           currentRound: item.current_round,
@@ -32,6 +39,7 @@ export const useHistoryStore = defineStore('history', {
           startedAt: item.started_at,
           endedAt: item.ended_at,
           hasReport: item.has_report,
+          isValid: item.is_valid,
           overallScore: item.overall_score,
         }))
         this.trend = this.records
@@ -83,6 +91,19 @@ export const useHistoryStore = defineStore('history', {
 
     clearReview() {
       this.currentReview = null
+    },
+
+    async deleteRecord(sessionId: string) {
+      await deleteInterviewApi(sessionId)
+      this.records = this.records.filter((item) => item.sessionId !== sessionId)
+    },
+
+    async updateValidity(sessionId: string, isValid: boolean) {
+      await updateInterviewValidityApi(sessionId, isValid)
+      const record = this.records.find((item) => item.sessionId === sessionId)
+      if (record) {
+        record.isValid = isValid
+      }
     },
   },
 })

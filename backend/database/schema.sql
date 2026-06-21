@@ -1,3 +1,18 @@
+CREATE TABLE IF NOT EXISTS users (
+    id BIGSERIAL PRIMARY KEY,
+    username VARCHAR(64) NOT NULL UNIQUE,
+    display_name VARCHAR(128) NULL,
+    email VARCHAR(128) NULL,
+    password_hash VARCHAR(255) NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO users (id, username, display_name)
+VALUES (1, 'default_user', '默认用户')
+ON CONFLICT (id) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS positions (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(128) NOT NULL,
@@ -9,50 +24,50 @@ CREATE TABLE IF NOT EXISTS positions (
     update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-COMMENT ON TABLE positions IS '面试岗位表';
-COMMENT ON COLUMN positions.id IS '主键ID';
-COMMENT ON COLUMN positions.name IS '岗位名称';
-COMMENT ON COLUMN positions.description IS '岗位描述';
-COMMENT ON COLUMN positions.difficulty_level IS '岗位难度：junior/middle/senior';
-COMMENT ON COLUMN positions.skill_tags IS '岗位技能标签';
-COMMENT ON COLUMN positions.is_active IS '是否启用';
-COMMENT ON COLUMN positions.create_time IS '创建时间';
-COMMENT ON COLUMN positions.update_time IS '更新时间';
-
 CREATE INDEX IF NOT EXISTS idx_positions_active ON positions (is_active);
+
+CREATE TABLE IF NOT EXISTS resume_profiles (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    title VARCHAR(128) NOT NULL,
+    content TEXT NOT NULL,
+    summary TEXT NULL,
+    is_default BOOLEAN NOT NULL DEFAULT TRUE,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_resume_profiles_user_id
+        FOREIGN KEY (user_id) REFERENCES users (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_resume_profiles_user_id ON resume_profiles (user_id);
+CREATE INDEX IF NOT EXISTS idx_resume_profiles_default ON resume_profiles (user_id, is_default);
 
 CREATE TABLE IF NOT EXISTS interview_sessions (
     id BIGSERIAL PRIMARY KEY,
     session_id VARCHAR(64) NOT NULL,
+    user_id BIGINT NOT NULL DEFAULT 1,
     position_id BIGINT NULL,
     job_role VARCHAR(128) NOT NULL,
+    direction VARCHAR(64) NULL,
+    interviewer_mode VARCHAR(64) NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'IN_PROGRESS',
     current_round INTEGER NOT NULL DEFAULT 1,
     duration_minutes INTEGER NOT NULL DEFAULT 45,
-    max_rounds INTEGER NOT NULL DEFAULT 8,
+    max_rounds INTEGER NOT NULL DEFAULT 999,
     started_at TIMESTAMP NULL,
     ended_at TIMESTAMP NULL,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    is_valid BOOLEAN NOT NULL DEFAULT TRUE,
     create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_interview_sessions_session_id UNIQUE (session_id),
+    CONSTRAINT fk_interview_sessions_user_id
+        FOREIGN KEY (user_id) REFERENCES users (id),
     CONSTRAINT fk_interview_sessions_position_id
         FOREIGN KEY (position_id) REFERENCES positions (id)
 );
 
-COMMENT ON TABLE interview_sessions IS '面试会话表';
-COMMENT ON COLUMN interview_sessions.id IS '主键ID';
-COMMENT ON COLUMN interview_sessions.session_id IS '面试会话业务ID';
-COMMENT ON COLUMN interview_sessions.position_id IS '岗位ID，MVP可为空并仅使用job_role';
-COMMENT ON COLUMN interview_sessions.job_role IS '面试岗位';
-COMMENT ON COLUMN interview_sessions.status IS '状态：IN_PROGRESS/FINISHED/REPORTED/CANCELLED';
-COMMENT ON COLUMN interview_sessions.current_round IS '当前轮次';
-COMMENT ON COLUMN interview_sessions.duration_minutes IS '面试时长上限，单位分钟';
-COMMENT ON COLUMN interview_sessions.max_rounds IS '最大轮次';
-COMMENT ON COLUMN interview_sessions.started_at IS '开始时间';
-COMMENT ON COLUMN interview_sessions.ended_at IS '结束时间';
-COMMENT ON COLUMN interview_sessions.create_time IS '创建时间';
-COMMENT ON COLUMN interview_sessions.update_time IS '更新时间';
-
+CREATE INDEX IF NOT EXISTS idx_interview_sessions_user_id ON interview_sessions (user_id);
 CREATE INDEX IF NOT EXISTS idx_interview_sessions_status ON interview_sessions (status);
 CREATE INDEX IF NOT EXISTS idx_interview_sessions_position_id ON interview_sessions (position_id);
 
@@ -68,15 +83,6 @@ CREATE TABLE IF NOT EXISTS interview_messages (
         FOREIGN KEY (interview_id) REFERENCES interview_sessions (id)
         ON DELETE CASCADE
 );
-
-COMMENT ON TABLE interview_messages IS '面试消息表';
-COMMENT ON COLUMN interview_messages.id IS '主键ID';
-COMMENT ON COLUMN interview_messages.interview_id IS '面试会话表ID';
-COMMENT ON COLUMN interview_messages.role IS '消息角色：AI_INTERVIEWER/USER_CANDIDATE/SYSTEM';
-COMMENT ON COLUMN interview_messages.content IS '消息内容';
-COMMENT ON COLUMN interview_messages.round_no IS '面试轮次';
-COMMENT ON COLUMN interview_messages.create_time IS '创建时间';
-COMMENT ON COLUMN interview_messages.update_time IS '更新时间';
 
 CREATE INDEX IF NOT EXISTS idx_interview_messages_interview_id
     ON interview_messages (interview_id);
@@ -100,18 +106,6 @@ CREATE TABLE IF NOT EXISTS interview_answer_reviews (
         ON DELETE CASCADE
 );
 
-COMMENT ON TABLE interview_answer_reviews IS '面试单轮回答隐藏复盘表';
-COMMENT ON COLUMN interview_answer_reviews.id IS '主键ID';
-COMMENT ON COLUMN interview_answer_reviews.interview_id IS '面试会话表ID';
-COMMENT ON COLUMN interview_answer_reviews.round_no IS '面试轮次';
-COMMENT ON COLUMN interview_answer_reviews.evaluation IS '本轮回答评价';
-COMMENT ON COLUMN interview_answer_reviews.reference_points IS '参考答题要点';
-COMMENT ON COLUMN interview_answer_reviews.sample_answer IS '参考回答';
-COMMENT ON COLUMN interview_answer_reviews.level IS '回答水平：good/normal/weak';
-COMMENT ON COLUMN interview_answer_reviews.raw_review_json IS '模型原始复盘结构';
-COMMENT ON COLUMN interview_answer_reviews.create_time IS '创建时间';
-COMMENT ON COLUMN interview_answer_reviews.update_time IS '更新时间';
-
 CREATE INDEX IF NOT EXISTS idx_interview_answer_reviews_interview_id
     ON interview_answer_reviews (interview_id);
 
@@ -134,22 +128,69 @@ CREATE TABLE IF NOT EXISTS interview_reports (
         ON DELETE CASCADE
 );
 
-COMMENT ON TABLE interview_reports IS '面试报告表';
-COMMENT ON COLUMN interview_reports.id IS '主键ID';
-COMMENT ON COLUMN interview_reports.interview_id IS '面试会话表ID';
-COMMENT ON COLUMN interview_reports.overall_score IS '总体评分';
-COMMENT ON COLUMN interview_reports.technical_analysis IS '技术能力分析';
-COMMENT ON COLUMN interview_reports.communication_analysis IS '表达能力分析';
-COMMENT ON COLUMN interview_reports.weakness_points IS '薄弱知识点';
-COMMENT ON COLUMN interview_reports.improvement_suggestions IS '改进建议';
-COMMENT ON COLUMN interview_reports.recommended_training IS '推荐训练方向';
-COMMENT ON COLUMN interview_reports.evidence_items IS '报告关键证据';
-COMMENT ON COLUMN interview_reports.raw_report_json IS 'Agent原始结构化报告';
-COMMENT ON COLUMN interview_reports.create_time IS '创建时间';
-COMMENT ON COLUMN interview_reports.update_time IS '更新时间';
-
 CREATE INDEX IF NOT EXISTS idx_interview_reports_interview_id
     ON interview_reports (interview_id);
+
+CREATE TABLE IF NOT EXISTS training_tasks (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    source_session_id VARCHAR(64) NULL,
+    title VARCHAR(128) NOT NULL,
+    reason TEXT NULL,
+    severity VARCHAR(32) NOT NULL DEFAULT 'Medium',
+    status VARCHAR(32) NOT NULL DEFAULT 'TODO',
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_training_tasks_user_id
+        FOREIGN KEY (user_id) REFERENCES users (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_training_tasks_user_id ON training_tasks (user_id);
+CREATE INDEX IF NOT EXISTS idx_training_tasks_status ON training_tasks (user_id, status);
+
+CREATE TABLE IF NOT EXISTS training_sessions (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    task_id BIGINT NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'IN_PROGRESS',
+    current_round INTEGER NOT NULL DEFAULT 1,
+    ended_at TIMESTAMP NULL,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_training_sessions_user_id
+        FOREIGN KEY (user_id) REFERENCES users (id),
+    CONSTRAINT fk_training_sessions_task_id
+        FOREIGN KEY (task_id) REFERENCES training_tasks (id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_training_sessions_user_id ON training_sessions (user_id);
+CREATE INDEX IF NOT EXISTS idx_training_sessions_task_id ON training_sessions (task_id);
+CREATE INDEX IF NOT EXISTS idx_training_sessions_status ON training_sessions (user_id, status);
+
+CREATE TABLE IF NOT EXISTS training_messages (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    training_session_id BIGINT NOT NULL,
+    role VARCHAR(32) NOT NULL,
+    content TEXT NOT NULL,
+    round_no INTEGER NOT NULL,
+    feedback TEXT NULL,
+    reference_points JSONB NULL,
+    sample_answer TEXT NULL,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_training_messages_user_id
+        FOREIGN KEY (user_id) REFERENCES users (id),
+    CONSTRAINT fk_training_messages_session_id
+        FOREIGN KEY (training_session_id) REFERENCES training_sessions (id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_training_messages_session_id
+    ON training_messages (training_session_id);
+CREATE INDEX IF NOT EXISTS idx_training_messages_round
+    ON training_messages (training_session_id, round_no);
 
 CREATE OR REPLACE FUNCTION set_update_time()
 RETURNS TRIGGER AS $$
@@ -159,9 +200,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_users_update_time ON users;
+CREATE TRIGGER trg_users_update_time
+BEFORE UPDATE ON users
+FOR EACH ROW EXECUTE FUNCTION set_update_time();
+
 DROP TRIGGER IF EXISTS trg_positions_update_time ON positions;
 CREATE TRIGGER trg_positions_update_time
 BEFORE UPDATE ON positions
+FOR EACH ROW EXECUTE FUNCTION set_update_time();
+
+DROP TRIGGER IF EXISTS trg_resume_profiles_update_time ON resume_profiles;
+CREATE TRIGGER trg_resume_profiles_update_time
+BEFORE UPDATE ON resume_profiles
 FOR EACH ROW EXECUTE FUNCTION set_update_time();
 
 DROP TRIGGER IF EXISTS trg_interview_sessions_update_time ON interview_sessions;
@@ -182,4 +233,19 @@ FOR EACH ROW EXECUTE FUNCTION set_update_time();
 DROP TRIGGER IF EXISTS trg_interview_reports_update_time ON interview_reports;
 CREATE TRIGGER trg_interview_reports_update_time
 BEFORE UPDATE ON interview_reports
+FOR EACH ROW EXECUTE FUNCTION set_update_time();
+
+DROP TRIGGER IF EXISTS trg_training_tasks_update_time ON training_tasks;
+CREATE TRIGGER trg_training_tasks_update_time
+BEFORE UPDATE ON training_tasks
+FOR EACH ROW EXECUTE FUNCTION set_update_time();
+
+DROP TRIGGER IF EXISTS trg_training_sessions_update_time ON training_sessions;
+CREATE TRIGGER trg_training_sessions_update_time
+BEFORE UPDATE ON training_sessions
+FOR EACH ROW EXECUTE FUNCTION set_update_time();
+
+DROP TRIGGER IF EXISTS trg_training_messages_update_time ON training_messages;
+CREATE TRIGGER trg_training_messages_update_time
+BEFORE UPDATE ON training_messages
 FOR EACH ROW EXECUTE FUNCTION set_update_time();
