@@ -23,3 +23,11 @@ export const getResumeProfileApi = () =>
 
 export const saveResumeProfileApi = (data: SaveResumeProfileRequest) =>
   request.put<SuccessResponse, SuccessResponse>('/resume/profile', data)
+
+export const uploadResumeApi = (file: File) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request.post<ResumeProfileResponse, ResumeProfileResponse>('/resume/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
