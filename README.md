@@ -96,6 +96,8 @@ ai-interview-coach/
 
 ### 启动后端
 
+本项目新增依赖：`pypdf`、`python-docx`、`python-multipart`，安装时会自动包含。
+
 ```bash
 cd backend
 python -m venv .venv
@@ -193,6 +195,10 @@ backend/database/migrations/
 - `POST /api/interview/{session_id}/finish`：结束面试
 - `GET /api/interview/{session_id}/review`：查询完整问答复盘
 
+简历相关：
+
+- `POST /api/resume/upload`：上传简历文件（支持 `.txt/.md/.pdf/.docx`，成功返回 201 和 `ResumeProfileResponse`，不支持/空/损坏文件返回 400）
+
 报告相关：
 
 - `GET /api/interview/reports`：查询报告列表
@@ -249,11 +255,11 @@ backend/database/migrations/
 - 面试报告
 - 报告列表与详情
 - 前端 Dashboard、模拟面试、报告、历史、能力画像、专项训练页面
+- 简历文件解析与上传
 
 暂未包含：
 
 - 用户登录与权限体系
-- 简历文件解析
 - 多岗位配置后台
 - 知识图谱
 - 个性化推荐系统
@@ -272,7 +278,7 @@ P0：核心闭环
 P1：体验增强
 
 - 用户体系
-- 简历文件上传与解析
+- ~~简历文件上传与解析~~（已完成）
 - 面试中断恢复
 - 报告证据链增强
 - 更稳定的大模型输出校验
