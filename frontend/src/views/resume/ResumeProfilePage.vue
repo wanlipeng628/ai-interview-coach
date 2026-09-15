@@ -6,7 +6,20 @@
         <h1>维护默认面试简历</h1>
         <span>这份简历会在开始模拟面试时自动作为 AI 面试官的上下文。</span>
       </div>
-      <el-button :loading="resume.saving" type="primary" @click="handleSave">保存简历</el-button>
+      <div class="header-actions">
+        <el-upload
+          :show-file-list="false"
+          :before-upload="beforeUpload"
+          :http-request="handleUpload"
+          accept=".txt,.md,.pdf,.docx"
+        >
+          <el-button :loading="resume.uploading" :disabled="resume.saving">
+            <el-icon><Upload /></el-icon>
+            <span>上传简历文件</span>
+          </el-button>
+        </el-upload>
+        <el-button :loading="resume.saving" type="primary" @click="handleSave">保存简历</el-button>
+      </div>
     </header>
 
     <section class="content">
@@ -44,6 +57,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Upload } from '@element-plus/icons-vue'
+import type { UploadRequestOptions } from 'element-plus'
 
 import { useResumeStore } from '@/stores/resume.store'
 
@@ -76,6 +91,29 @@ const handleSave = async () => {
   await resume.saveProfile(form.title.trim() || '默认简历', form.content.trim())
   ElMessage.success('简历已保存')
 }
+
+const allowedExtensions = ['.txt', '.md', '.pdf', '.docx']
+
+const beforeUpload = (file: File) => {
+  const name = file.name.toLowerCase()
+  const valid = allowedExtensions.some((ext) => name.endsWith(ext))
+  if (!valid) {
+    ElMessage.error('仅支持 .txt / .md / .pdf / .docx 格式')
+    return false
+  }
+  return true
+}
+
+const handleUpload = async (options: UploadRequestOptions) => {
+  try {
+    const profile = await resume.uploadResume(options.file)
+    form.title = profile.title
+    form.content = profile.content
+    ElMessage.success('简历文件已解析并回填')
+  } catch {
+    ElMessage.error(resume.errorMessage || '简历文件解析失败')
+  }
+}
 </script>
 
 <style scoped lang="scss">
@@ -93,6 +131,11 @@ const handleSave = async () => {
   padding: 24px;
   border-radius: 8px;
   background: #fff;
+
+  .header-actions {
+    display: flex;
+    gap: 12px;
+  }
 
   p {
     margin: 0 0 8px;

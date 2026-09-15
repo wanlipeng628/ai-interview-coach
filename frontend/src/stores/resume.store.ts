@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 
-import { getResumeProfileApi, saveResumeProfileApi } from '@/api/resume.api'
+import { getResumeProfileApi, saveResumeProfileApi, uploadResumeApi } from '@/api/resume.api'
 import type { ResumeProfile } from '@/types/resume'
 
 export const useResumeStore = defineStore('resume', {
@@ -8,6 +8,7 @@ export const useResumeStore = defineStore('resume', {
     profile: null as ResumeProfile | null,
     loading: false,
     saving: false,
+    uploading: false,
     errorMessage: '',
   }),
 
@@ -41,6 +42,28 @@ export const useResumeStore = defineStore('resume', {
         await this.fetchProfile()
       } finally {
         this.saving = false
+      }
+    },
+
+    async uploadResume(file: File) {
+      this.uploading = true
+      this.errorMessage = ''
+      try {
+        const profile = await uploadResumeApi(file)
+        this.profile = {
+          id: profile.id,
+          title: profile.title,
+          content: profile.content,
+          summary: profile.summary,
+          isDefault: profile.is_default,
+          updateTime: profile.update_time,
+        }
+        return this.profile
+      } catch (error) {
+        this.errorMessage = getErrorMessage(error)
+        throw error
+      } finally {
+        this.uploading = false
       }
     },
   },
