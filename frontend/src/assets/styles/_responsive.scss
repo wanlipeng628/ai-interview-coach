@@ -1,6 +1,7 @@
 // 移动端断点与尺寸基准，各页面 scoped 样式通过 @use '@/assets/styles/responsive' as * 复用
+// 硬约束：≥1024px 为桌面端，保持改造前样式；所有适配只写在下面的断点内
 $mobile-max: 768px;
-$tablet-max: 1024px;
+$desktop-min: 1024px;
 
 $topbar-height: 52px;
 $tabbar-height: 56px;
@@ -8,14 +9,16 @@ $safe-bottom: env(safe-area-inset-bottom, 0px);
 
 $touch-target: 44px;
 
+// ≤768px 移动端
 @mixin mobile {
   @media (max-width: #{$mobile-max}) {
     @content;
   }
 }
 
-@mixin tablet-down {
-  @media (max-width: #{$tablet-max}) {
+// 769~1023px 中间态侧栏图标栏（1024px 起回到桌面布局）
+@mixin icon-rail {
+  @media (min-width: #{$mobile-max + 1px}) and (max-width: #{$desktop-min - 1px}) {
     @content;
   }
 }

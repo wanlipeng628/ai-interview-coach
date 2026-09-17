@@ -14,11 +14,11 @@
           aria-label="返回面试准备页"
           @click="router.push('/mock-interview')"
         />
-        <div class="room-header__title">
+        <div>
           <p>AI 模拟面试</p>
           <h1>{{ interview.info.jobRole }}</h1>
         </div>
-        <el-tag class="room-header__tag" size="large" effect="light">聊天式面试</el-tag>
+        <el-tag size="large" effect="light">聊天式面试</el-tag>
       </div>
 
       <InterviewChatPanel :messages="interview.messages" />
@@ -59,8 +59,8 @@ let durationTimer: number | undefined
 const isMobile = useMediaQuery('(max-width: 768px)')
 const roomHeight = ref('')
 
-// 移动端软键盘弹起时视觉视口变矮，用它的高度驱动房间高度，保证输入栏不被遮挡
-const roomStyle = computed(() => (roomHeight.value ? { height: roomHeight.value } : {}))
+// 仅移动端生效：跟随 visualViewport 高度，避免软键盘弹出后输入栏被遮挡
+const roomStyle = computed(() => (roomHeight.value ? { height: roomHeight.value } : undefined))
 
 const syncViewportHeight = () => {
   const viewport = window.visualViewport
@@ -107,9 +107,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (durationTimer) window.clearInterval(durationTimer)
   window.visualViewport?.removeEventListener('resize', syncViewportHeight)
   window.visualViewport?.removeEventListener('scroll', syncViewportHeight)
+  if (durationTimer) window.clearInterval(durationTimer)
 })
 </script>
 
@@ -171,8 +171,8 @@ onBeforeUnmount(() => {
   }
 }
 
+// 移动端整页作为独立全屏房间：固定定位、跟随 visualViewport 高度、底部留出安全区
 @include mobile {
-  // 移动端做成整屏房间：聊天区在内部滚动，输入栏始终贴底
   .interview-page {
     position: fixed;
     top: 0;
@@ -201,27 +201,26 @@ onBeforeUnmount(() => {
   }
 
   .room-header {
-    justify-content: flex-start;
-    gap: 8px;
+    gap: 10px;
     padding: 12px 14px;
 
-    p {
-      margin-bottom: 4px;
-      font-size: 13px;
+    > div {
+      flex: 1;
+      min-width: 0;
     }
 
     h1 {
       font-size: 17px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
   }
 
   .room-header__back {
-    flex: 0 0 auto;
-    margin-right: 2px;
-  }
-
-  .room-header__tag {
-    margin-left: auto;
+    min-height: $touch-target;
+    min-width: $touch-target;
+    margin-left: -8px;
   }
 }
 </style>

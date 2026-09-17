@@ -1,15 +1,19 @@
 <template>
   <el-card shadow="never" class="info-panel">
     <template #header>
-      <div class="panel-header">
-        <h2>面试信息</h2>
-        <el-button v-if="isMobile" link type="primary" @click="expanded = !expanded">
-          {{ expanded ? '收起' : '展开' }}
-          <el-icon>
-            <component :is="expanded ? ArrowUp : ArrowDown" />
-          </el-icon>
-        </el-button>
-      </div>
+      <h2>面试信息</h2>
+      <el-button
+        v-if="isMobile"
+        class="info-panel__toggle"
+        link
+        type="primary"
+        @click="expanded = !expanded"
+      >
+        {{ expanded ? '收起' : '展开' }}
+        <el-icon>
+          <component :is="expanded ? ArrowUp : ArrowDown" />
+        </el-icon>
+      </el-button>
     </template>
 
     <div v-show="!isMobile || expanded" class="info-list">
@@ -60,16 +64,9 @@ const formattedDuration = computed(() => {
   border-radius: 8px;
 }
 
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-
-  h2 {
-    margin: 0;
-    font-size: 17px;
-  }
+h2 {
+  margin: 0;
+  font-size: 17px;
 }
 
 .info-list {
@@ -92,7 +89,19 @@ const formattedDuration = computed(() => {
   }
 }
 
+// 折叠按钮只在移动端渲染，桌面端 #header 内仍只有 h2，样式与改造前一致
 @include mobile {
+  .info-panel :deep(.el-card__header) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .info-panel__toggle {
+    min-height: $touch-target;
+  }
+
   .info-list {
     gap: 12px;
 
