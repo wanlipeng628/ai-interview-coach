@@ -83,12 +83,20 @@ defineProps<{
 @include mobile {
   .message {
     gap: 8px;
+    min-width: 0;
   }
 
   .bubble {
     max-width: 84%;
+    min-width: 0;
     padding: 11px 13px;
     line-height: 1.6;
+
+    // 长 URL / 长类名这类不可断行的 token 会把 min-content 撑大，
+    // 而消息行同属一个 grid track，一条长 token 会把所有气泡一起撑宽
+    p {
+      overflow-wrap: anywhere;
+    }
   }
 }
 </style>

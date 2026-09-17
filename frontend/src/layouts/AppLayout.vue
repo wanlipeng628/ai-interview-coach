@@ -23,6 +23,7 @@
           :key="item.path"
           class="menu__item"
           :class="{ 'menu__item--active': route.path.startsWith(item.activePath ?? item.path) }"
+          :title="isIconRail ? item.label : undefined"
           @click="router.push(item.path)"
         >
           <el-icon><House /></el-icon>
@@ -116,6 +117,8 @@ const router = useRouter()
 
 // 移动端顶栏 / 底部 TabBar / 「更多」抽屉：桌面端整体不渲染，DOM 与改造前完全一致
 const isMobile = useMediaQuery('(max-width: 768px)')
+// 图标栏模式只有图标没有文案，用 title 兜住；非该区间时 title 为 undefined，属性不会落到 DOM 上
+const isIconRail = useMediaQuery('(min-width: 769px) and (max-width: 1023px)')
 
 // 侧栏菜单保持改造前的 6 项，桌面端渲染结果不变
 const menus: MenuItem[] = [
