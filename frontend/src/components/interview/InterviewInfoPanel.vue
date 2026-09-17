@@ -1,5 +1,9 @@
 <template>
-  <el-card shadow="never" class="info-panel">
+  <el-card
+    shadow="never"
+    class="info-panel"
+    :class="{ 'info-panel--collapsed': isMobile && !expanded }"
+  >
     <template #header>
       <h2>面试信息</h2>
       <el-button
@@ -100,6 +104,12 @@ h2 {
 
   .info-panel__toggle {
     min-height: $touch-target;
+  }
+
+  // 折叠后 body 内只剩 display:none 的列表，不收起内边距就会在标题下留一条空白
+  .info-panel--collapsed :deep(.el-card__body) {
+    padding-top: 0;
+    padding-bottom: 0;
   }
 
   .info-list {
