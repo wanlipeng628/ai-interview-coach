@@ -1,0 +1,83 @@
+# 适配 2 核 1G 小内存服务器
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DATABASE}
+      TZ: Asia/Shanghai
+    # 压住 PostgreSQL 内存占用（1G 机器关键）
+    command:
+      - postgres
+      - -c
+      - shared_buffers=48MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=24MB
+      - -c
+      - effective_cache_size=192MB
+      - -c
+      - max_connections=20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # 首次启动自动导入表结构
+      - ./backend/database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 320m
+    networks:
+      - app
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: prod
+      APP_DEBUG: "false"
+      # 容器内通过服务名访问数据库，覆盖 .env 里的外部地址
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE}
+      # 1G 机器下调小连接池
+      POSTGRES_POOL_SIZE: "3"
+      POSTGRES_MAX_OVERFLOW: "3"
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+      LLM_PROVIDER: ${LLM_PROVIDER:-sensenova}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-v4-flash}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.7}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-60}
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 448m
+    networks:
+      - app
+
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    mem_limit: 64m
+    networks:
+      - app
+
+volumes:
+  pgdata:
+
+networks:
+  app:
+    driver: bridge

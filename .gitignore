@@ -20,6 +20,7 @@ htmlcov/
 .env
 .env.*
 !.env.example
+!.env.deploy.example
 
 node_modules/
 dist/
