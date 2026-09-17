@@ -17,6 +17,8 @@ defineProps<{
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -55,6 +57,26 @@ defineProps<{
 @media (max-width: 980px) {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@include mobile {
+  .metric-grid {
+    gap: 10px;
+  }
+
+  .metric-card {
+    gap: 6px;
+    min-height: 92px;
+    padding: 14px;
+
+    span {
+      font-size: 13px;
+    }
+
+    strong {
+      font-size: 22px;
+    }
   }
 }
 </style>

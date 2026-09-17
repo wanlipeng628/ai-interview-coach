@@ -1,0 +1,21 @@
+// 移动端断点与尺寸基准，各页面 scoped 样式通过 @use '@/assets/styles/responsive' as * 复用
+$mobile-max: 768px;
+$tablet-max: 1024px;
+
+$topbar-height: 52px;
+$tabbar-height: 56px;
+$safe-bottom: env(safe-area-inset-bottom, 0px);
+
+$touch-target: 44px;
+
+@mixin mobile {
+  @media (max-width: #{$mobile-max}) {
+    @content;
+  }
+}
+
+@mixin tablet-down {
+  @media (max-width: #{$tablet-max}) {
+    @content;
+  }
+}

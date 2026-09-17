@@ -1,3 +1,5 @@
+@use './responsive' as *;
+
 * {
   box-sizing: border-box;
 }
@@ -34,4 +36,25 @@ textarea {
 
 .el-card__body {
   padding: 20px;
+}
+
+@include mobile {
+  // 窄屏收紧卡片内边距，与页面 14px 的内容区节奏保持一致
+  .el-card .el-card__header {
+    padding: 14px;
+  }
+
+  .el-card .el-card__body {
+    padding: 14px;
+  }
+
+  // 触控目标不小于 44px
+  .el-button {
+    min-height: $touch-target;
+  }
+
+  .el-input__wrapper,
+  .el-textarea__inner {
+    min-height: $touch-target;
+  }
 }

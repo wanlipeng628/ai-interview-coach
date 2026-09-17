@@ -20,6 +20,8 @@ defineProps<{
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .message {
   display: flex;
   align-items: flex-start;
@@ -75,6 +77,18 @@ defineProps<{
 @keyframes blink {
   50% {
     opacity: 0;
+  }
+}
+
+@include mobile {
+  .message {
+    gap: 8px;
+  }
+
+  .bubble {
+    max-width: 84%;
+    padding: 11px 13px;
+    line-height: 1.6;
   }
 }
 </style>

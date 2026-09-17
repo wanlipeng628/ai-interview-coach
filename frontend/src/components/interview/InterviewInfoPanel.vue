@@ -1,10 +1,18 @@
 <template>
   <el-card shadow="never" class="info-panel">
     <template #header>
-      <h2>面试信息</h2>
+      <div class="panel-header">
+        <h2>面试信息</h2>
+        <el-button v-if="isMobile" link type="primary" @click="expanded = !expanded">
+          {{ expanded ? '收起' : '展开' }}
+          <el-icon>
+            <component :is="expanded ? ArrowUp : ArrowDown" />
+          </el-icon>
+        </el-button>
+      </div>
     </template>
 
-    <div class="info-list">
+    <div v-show="!isMobile || expanded" class="info-list">
       <div>
         <span>当前岗位</span>
         <strong>{{ info.jobRole }}</strong>
@@ -24,13 +32,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ArrowDown, ArrowUp } from '@element-plus/icons-vue'
+import { computed, ref } from 'vue'
 
+import { useMediaQuery } from '@/composables/useMediaQuery'
 import type { InterviewInfo } from '@/types/interview'
 
 const props = defineProps<{
   info: InterviewInfo
 }>()
+
+const isMobile = useMediaQuery('(max-width: 768px)')
+const expanded = ref(false)
 
 const formattedDuration = computed(() => {
   const minutes = Math.floor(props.info.durationSeconds / 60)
@@ -40,14 +53,23 @@ const formattedDuration = computed(() => {
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .info-panel {
   border: 0;
   border-radius: 8px;
 }
 
-h2 {
-  margin: 0;
-  font-size: 17px;
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  h2 {
+    margin: 0;
+    font-size: 17px;
+  }
 }
 
 .info-list {
@@ -67,6 +89,16 @@ h2 {
   strong {
     color: #101828;
     font-size: 18px;
+  }
+}
+
+@include mobile {
+  .info-list {
+    gap: 12px;
+
+    strong {
+      font-size: 15px;
+    }
   }
 }
 </style>

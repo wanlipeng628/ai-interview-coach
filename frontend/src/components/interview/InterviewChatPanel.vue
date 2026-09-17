@@ -30,6 +30,8 @@ watch(
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .chat-panel {
   min-height: 0;
   display: grid;
@@ -39,5 +41,12 @@ watch(
   padding: 20px;
   border-radius: 8px;
   background: #eef3fb;
+}
+
+@include mobile {
+  .chat-panel {
+    gap: 12px;
+    padding: 12px;
+  }
 }
 </style>
