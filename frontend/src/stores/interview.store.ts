@@ -16,6 +16,8 @@ import type {
   LatestActiveInterview,
 } from '@/types/interview'
 
+import { uuid } from '@/utils/uuid'
+
 interface InterviewState {
   info: InterviewInfo
   messages: InterviewMessage[]
@@ -54,7 +56,7 @@ export const useInterviewStore = defineStore('interview', {
     },
     messages: [
       {
-        id: crypto.randomUUID(),
+        id: uuid(),
         role: 'ai',
         questionNo: 1,
         content:
@@ -121,7 +123,7 @@ export const useInterviewStore = defineStore('interview', {
         }
         this.messages = [
           {
-            id: crypto.randomUUID(),
+            id: uuid(),
             role: 'ai',
             questionNo: 1,
             content: response.first_question,
@@ -157,7 +159,7 @@ export const useInterviewStore = defineStore('interview', {
         }
         this.messages = messages
           .map((item) => ({
-            id: crypto.randomUUID(),
+            id: uuid(),
             role: mapRestoredRole(item.role),
             content: item.content,
             questionNo: item.round_no || undefined,
@@ -193,7 +195,7 @@ export const useInterviewStore = defineStore('interview', {
 
       const questionNo = this.info.currentQuestionNo
       const userMessage: InterviewMessage = {
-        id: crypto.randomUUID(),
+        id: uuid(),
         role: 'user',
         content: text,
         questionNo,
@@ -238,7 +240,7 @@ export const useInterviewStore = defineStore('interview', {
 
     streamNextQuestion(question: string) {
       this.isStreaming = true
-      const messageId = crypto.randomUUID()
+      const messageId = uuid()
       const message: InterviewMessage = {
         id: messageId,
         role: 'ai',
@@ -287,7 +289,7 @@ export const useInterviewStore = defineStore('interview', {
       const alreadyHasFinishMessage = this.messages.some((item) => item.content === finishMessage)
       if (!alreadyHasFinishMessage) {
         this.messages.push({
-          id: crypto.randomUUID(),
+          id: uuid(),
           role: 'ai',
           content: finishMessage,
           createdAt: new Date().toISOString(),
