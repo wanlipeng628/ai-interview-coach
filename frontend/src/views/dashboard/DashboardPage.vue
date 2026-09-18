@@ -44,6 +44,8 @@ const handleStartInterview = () => {
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .dashboard-page {
   display: grid;
   gap: 18px;
@@ -64,6 +66,17 @@ const handleStartInterview = () => {
   .dashboard-grid,
   .dashboard-grid--bottom {
     grid-template-columns: 1fr;
+  }
+}
+
+@include mobile {
+  .dashboard-page {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .dashboard-grid {
+    gap: 12px;
   }
 }
 </style>

@@ -22,6 +22,8 @@ defineEmits<{
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .welcome-panel {
   display: flex;
   align-items: center;
@@ -48,5 +50,22 @@ h1 {
 .subtitle {
   margin: 8px 0 0;
   color: #667085;
+}
+
+@include mobile {
+  .welcome-panel {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+    padding: 18px;
+  }
+
+  h1 {
+    font-size: 21px;
+  }
+
+  .subtitle {
+    font-size: 13px;
+  }
 }
 </style>

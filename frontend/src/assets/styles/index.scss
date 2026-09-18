@@ -1,3 +1,5 @@
+@use './responsive' as *;
+
 * {
   box-sizing: border-box;
 }
@@ -34,4 +36,35 @@ textarea {
 
 .el-card__body {
   padding: 20px;
+}
+
+@include mobile {
+  // 窄屏收紧卡片内边距，与页面 14px 的内容区节奏保持一致
+  .el-card .el-card__header {
+    padding: 14px;
+  }
+
+  .el-card .el-card__body {
+    padding: 14px;
+  }
+
+  // 「更多」抽屉：标题到首条目的默认留白 52px（header margin 32 + body padding 20），收紧到 12px。
+  // 抽屉内容 teleport 到 body，组件内的 scoped 选择器带不上作用域，只能用全局选择器。
+  .more-drawer .el-drawer__header {
+    margin-bottom: 0;
+  }
+
+  .more-drawer .el-drawer__body {
+    padding-top: 12px;
+  }
+
+  // 触控目标不小于 44px
+  .el-button {
+    min-height: $touch-target;
+  }
+
+  .el-input__wrapper,
+  .el-textarea__inner {
+    min-height: $touch-target;
+  }
 }

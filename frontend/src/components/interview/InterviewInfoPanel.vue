@@ -1,10 +1,26 @@
 <template>
-  <el-card shadow="never" class="info-panel">
+  <el-card
+    shadow="never"
+    class="info-panel"
+    :class="{ 'info-panel--collapsed': isMobile && !expanded }"
+  >
     <template #header>
       <h2>面试信息</h2>
+      <el-button
+        v-if="isMobile"
+        class="info-panel__toggle"
+        link
+        type="primary"
+        @click="expanded = !expanded"
+      >
+        {{ expanded ? '收起' : '展开' }}
+        <el-icon>
+          <component :is="expanded ? ArrowUp : ArrowDown" />
+        </el-icon>
+      </el-button>
     </template>
 
-    <div class="info-list">
+    <div v-show="!isMobile || expanded" class="info-list">
       <div>
         <span>当前岗位</span>
         <strong>{{ info.jobRole }}</strong>
@@ -24,13 +40,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ArrowDown, ArrowUp } from '@element-plus/icons-vue'
+import { computed, ref } from 'vue'
 
+import { useMediaQuery } from '@/composables/useMediaQuery'
 import type { InterviewInfo } from '@/types/interview'
 
 const props = defineProps<{
   info: InterviewInfo
 }>()
+
+const isMobile = useMediaQuery('(max-width: 768px)')
+const expanded = ref(false)
 
 const formattedDuration = computed(() => {
   const minutes = Math.floor(props.info.durationSeconds / 60)
@@ -40,6 +61,8 @@ const formattedDuration = computed(() => {
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .info-panel {
   border: 0;
   border-radius: 8px;
@@ -67,6 +90,34 @@ h2 {
   strong {
     color: #101828;
     font-size: 18px;
+  }
+}
+
+// 折叠按钮只在移动端渲染，桌面端 #header 内仍只有 h2，样式与改造前一致
+@include mobile {
+  .info-panel :deep(.el-card__header) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .info-panel__toggle {
+    min-height: $touch-target;
+  }
+
+  // 折叠后 body 内只剩 display:none 的列表，不收起内边距就会在标题下留一条空白
+  .info-panel--collapsed :deep(.el-card__body) {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .info-list {
+    gap: 12px;
+
+    strong {
+      font-size: 15px;
+    }
   }
 }
 </style>
