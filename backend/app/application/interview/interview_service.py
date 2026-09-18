@@ -2,7 +2,10 @@ from datetime import UTC, datetime
 import logging
 import re
 import threading
+import time
 from uuid import uuid4
+
+from openai import RateLimitError
 
 from app.application.interview.interview_dto import (
     LatestActiveInterviewResponse,
@@ -242,7 +245,8 @@ class InterviewService:
             if not target_rounds:
                 return
             agent = self._interviewer_agent or InterviewerAgent()
-            reviews = agent.generate_reviews_for_session(
+            reviews = self._generate_reviews_with_retry(
+                agent=agent,
                 job_role=session.job_role,
                 direction=session.direction,
                 interviewer_mode=session.interviewer_mode,
@@ -262,6 +266,44 @@ class InterviewService:
                 )
         except Exception:
             logging.getLogger(__name__).exception("backfill reviews failed for session %s", session_id)
+
+    def _generate_reviews_with_retry(
+        self,
+        agent: InterviewerAgent,
+        *,
+        job_role: str,
+        direction: str | None,
+        interviewer_mode: str | None,
+        resume_text: str | None,
+        history: list[dict[str, str]],
+        rounds: list[int],
+        max_attempts: int = 3,
+        base_wait_seconds: float = 15.0,
+    ):
+        """Generate reviews with backoff retry on rate limits (background task)."""
+        last_error: Exception | None = None
+        for attempt in range(max_attempts):
+            try:
+                return agent.generate_reviews_for_session(
+                    job_role=job_role,
+                    direction=direction,
+                    interviewer_mode=interviewer_mode,
+                    resume_text=resume_text,
+                    history=history,
+                    rounds=rounds,
+                )
+            except RateLimitError as exc:
+                last_error = exc
+                if attempt < max_attempts - 1:
+                    wait = base_wait_seconds * (attempt + 1)
+                    logging.getLogger(__name__).warning(
+                        "rate limited during backfill reviews (attempt %s), waiting %.0fs",
+                        attempt + 1,
+                        wait,
+                    )
+                    time.sleep(wait)
+        if last_error is not None:
+            raise last_error
 
     @staticmethod
     def _round_no_of(item: dict[str, str]) -> int | None:
