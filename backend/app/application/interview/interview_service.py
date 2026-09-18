@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
+import logging
 import re
+import threading
 from uuid import uuid4
 
 from app.application.interview.interview_dto import (
@@ -115,13 +117,8 @@ class InterviewService:
 
         elapsed_minutes = self._elapsed_minutes(session.created_at)
         if elapsed_minutes >= session.duration_minutes:
-            self._repository.save_answer_review(
-                user_id=user_id,
-                session_id=session_id,
-                round_no=round_no,
-                review=self._build_fallback_answer_review(answer),
-            )
             self._repository.finish(user_id, session_id)
+            self._schedule_backfill_reviews(user_id, session_id)
             return SubmitAnswerResponse(
                 session_id=session_id,
                 round_no=round_no,
@@ -144,14 +141,9 @@ class InterviewService:
             resume_text=self._extract_resume_text(history),
             history=history,
         )
-        self._repository.save_answer_review(
-            user_id=user_id,
-            session_id=session_id,
-            round_no=round_no,
-            review=self._to_domain_answer_review(decision.answer_review, answer),
-        )
         if decision.decision == "end":
             self._repository.finish(user_id, session_id)
+            self._schedule_backfill_reviews(user_id, session_id)
             return SubmitAnswerResponse(
                 session_id=session_id,
                 round_no=round_no,
@@ -202,8 +194,90 @@ class InterviewService:
 
         if session.status == InterviewSessionStatus.IN_PROGRESS:
             self._repository.finish(user_id, session_id)
+            self._schedule_backfill_reviews(user_id, session_id)
 
         return FinishInterviewResponse(session_id=session_id, is_finished=True)
+
+    def regenerate_reviews(self, user_id: int, session_id: str) -> SuccessResponse:
+        """Force regenerate all answer reviews for a finished session in the background."""
+        session = self._repository.get_by_id(user_id, session_id)
+        if session is None:
+            raise ValueError("Interview session not found")
+        if session.status == InterviewSessionStatus.IN_PROGRESS:
+            raise ValueError("Interview session is still in progress")
+        self._schedule_backfill_reviews(user_id, session_id, force=True)
+        return SuccessResponse(success=True)
+
+    def _schedule_backfill_reviews(self, user_id: int, session_id: str, force: bool = False) -> None:
+        thread = threading.Thread(
+            target=self._backfill_reviews,
+            args=(user_id, session_id, force),
+            name=f"backfill-reviews-{session_id[:8]}",
+            daemon=True,
+        )
+        thread.start()
+
+    def _backfill_reviews(self, user_id: int, session_id: str, force: bool = False) -> None:
+        try:
+            session = self._repository.get_by_id(user_id, session_id)
+            if session is None:
+                return
+            history = self._repository.list_messages(user_id, session_id)
+            candidate_rounds = sorted(
+                {
+                    round_no
+                    for item in history
+                    if item.get("role") == "USER_CANDIDATE"
+                    for round_no in [self._round_no_of(item)]
+                    if round_no is not None
+                }
+            )
+            if not candidate_rounds:
+                return
+            if force:
+                target_rounds = candidate_rounds
+            else:
+                existing = self._repository.list_answer_reviews(user_id, session_id)
+                target_rounds = [round_no for round_no in candidate_rounds if round_no not in existing]
+            if not target_rounds:
+                return
+            agent = self._interviewer_agent or InterviewerAgent()
+            reviews = agent.generate_reviews_for_session(
+                job_role=session.job_role,
+                direction=session.direction,
+                interviewer_mode=session.interviewer_mode,
+                resume_text=self._extract_resume_text(history),
+                history=history,
+                rounds=target_rounds,
+            )
+            for round_no in target_rounds:
+                review = reviews.get(round_no)
+                if review is None:
+                    continue
+                self._repository.save_answer_review(
+                    user_id=user_id,
+                    session_id=session_id,
+                    round_no=round_no,
+                    review=self._to_domain_answer_review(review, self._answer_for_round(history, round_no)),
+                )
+        except Exception:
+            logging.getLogger(__name__).exception("backfill reviews failed for session %s", session_id)
+
+    @staticmethod
+    def _round_no_of(item: dict[str, str]) -> int | None:
+        try:
+            return int(item.get("round_no"))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _answer_for_round(history: list[dict[str, str]], round_no: int) -> str:
+        for item in history:
+            if item.get("role") != "USER_CANDIDATE":
+                continue
+            if InterviewService._round_no_of(item) == round_no:
+                return str(item.get("content") or "")
+        return ""
 
     def get_session(self, user_id: int, session_id: str) -> InterviewSessionResponse | None:
         session = self._repository.get_by_id(user_id, session_id)

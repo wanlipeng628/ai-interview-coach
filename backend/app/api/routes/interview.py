@@ -157,6 +157,25 @@ async def finish_interview(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
 
 
+@router.post(
+    "/{session_id}/reviews/regenerate",
+    response_model=SuccessResponse,
+)
+async def regenerate_interview_reviews(
+    session_id: str,
+    user_id: int = Depends(get_current_user_id),
+    service: InterviewService = Depends(get_interview_service),
+) -> SuccessResponse:
+    """Force regenerate all answer reviews in the background."""
+    try:
+        return service.regenerate_reviews(user_id, session_id)
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
+
+
 @router.delete(
     "/{session_id}",
     response_model=SuccessResponse,

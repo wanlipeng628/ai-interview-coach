@@ -36,8 +36,10 @@
     <InterviewReviewDrawer
       :visible="reviewVisible"
       :loading="history.loadingReview"
+      :regenerating="regenerating"
       :review="history.currentReview"
       @close="handleCloseReview"
+      @regenerate="handleRegenerate"
     />
   </div>
 </template>
@@ -56,10 +58,24 @@ import { useHistoryStore } from '@/stores/history.store'
 const history = useHistoryStore()
 const router = useRouter()
 const reviewVisible = ref(false)
+const regenerating = ref(false)
 
 const handleDetail = async (sessionId: string) => {
   reviewVisible.value = true
   await history.fetchReview(sessionId)
+}
+
+const handleRegenerate = async () => {
+  if (!history.currentReview) return
+  regenerating.value = true
+  try {
+    await history.regenerateReview(history.currentReview.sessionId)
+    ElMessage.success('复盘已重新生成')
+  } catch {
+    ElMessage.error('重新生成失败，请稍后重试')
+  } finally {
+    regenerating.value = false
+  }
 }
 
 const handleCloseReview = () => {

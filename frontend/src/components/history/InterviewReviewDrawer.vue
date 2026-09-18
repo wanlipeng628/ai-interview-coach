@@ -13,7 +13,12 @@
           <p>面试岗位</p>
           <h2>{{ review.jobRole }}</h2>
         </div>
-        <el-tag>{{ review.answeredCount }} 轮回答</el-tag>
+        <div class="actions">
+          <el-tag>{{ review.answeredCount }} 轮回答</el-tag>
+          <el-button size="small" :loading="regenerating" @click="$emit('regenerate')">
+            重新生成复盘
+          </el-button>
+        </div>
       </header>
 
       <el-empty v-if="review.rounds.length === 0" description="暂无可复盘问答" />
@@ -70,11 +75,13 @@ import type { InterviewReview } from '@/types/history'
 defineProps<{
   visible: boolean
   loading: boolean
+  regenerating: boolean
   review: InterviewReview | null
 }>()
 
 defineEmits<{
   close: []
+  regenerate: []
 }>()
 
 const getLevelTagType = (level: string) => {
@@ -113,6 +120,12 @@ const getLevelText = (level: string) => {
     margin: 0;
     font-size: 20px;
   }
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .round-title {

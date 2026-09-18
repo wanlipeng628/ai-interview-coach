@@ -32,7 +32,7 @@ class InterviewerAgent:
 目标：
 1. 面试过程要像真实技术面试，候选人只能看到面试官的问题。
 2. 每轮根据候选人的上一轮回答决定继续追问、切换方向或结束面试。
-3. 同时为系统内部生成上一轮回答复盘，但复盘绝不能出现在 question 字段里。
+3. 先在心里评估候选人上一轮回答的质量（完整性、技术深度、是否需要追问），再做出决策。
 
 面试方式：
 1. 开始阶段优先围绕候选人的自我介绍、简历、项目经历追问。
@@ -60,25 +60,13 @@ class InterviewerAgent:
 5. 不要让候选人同时回答实现、原理、优化、排查、对比多个方向。
 6. 如果要深入，只选择候选人回答里最关键的一个点继续问。
 7. 不要重复历史中已经问过的问题，也不要换一种说法重复考察同一个知识点。
-
-隐藏复盘规则：
-1. answer_review 只用于系统记录，候选人在面试过程中看不到。
-2. answer_review 要评价上一轮候选人回答，不要评价即将提出的问题。
-3. answer_review.reference_points 必须围绕上一轮问题生成，不能所有问题都返回同一套通用要点。
-4. answer_review.sample_answer 必须围绕上一轮问题生成一段参考回答，不要使用固定模板。
-5. question 里不得出现“回答不错、回答不完整、你刚才没有说清楚、建议你”等评价或指导。
+8. question 里不得出现“回答不错、回答不完整、你刚才没有说清楚、建议你”等评价或指导。
 
 你必须只输出严格 JSON，不要输出 Markdown。JSON 格式：
 {
   "decision": "continue|switch|end",
   "question": "下一个单一问题或 null",
-  "reason": "简短说明为什么继续、切换或结束",
-  "answer_review": {
-    "evaluation": "对候选人上一轮回答的简短复盘",
-    "reference_points": ["上一轮问题的参考要点", "参考要点", "参考要点"],
-    "sample_answer": "上一轮问题的一段参考回答",
-    "level": "good|normal|weak"
-  }
+  "reason": "说明决策依据，必须体现对候选人上一轮回答的具体评估（是否完整、是否有技术深度、是否需要追问）"
 }
 """.strip()
 
@@ -120,9 +108,8 @@ class InterviewerAgent:
                     f"候选人简历：\n{resume_text or '未提供简历'}\n\n"
                     "历史问答：\n"
                     f"{self._format_history(history)}\n\n"
-                    "请基于候选人最近一轮回答，输出下一步决策。\n"
-                    "再次强调：question 只能是下一个单一面试问题，不能包含评价；"
-                    "answer_review 只记录上一轮回答的内部复盘。"
+                    "请基于候选人最近一轮回答，先在心里评估回答质量，再输出下一步决策。\n"
+                    "再次强调：question 只能是下一个单一面试问题，不能包含任何评价或指导。"
                 ),
             },
         ]
@@ -169,6 +156,119 @@ class InterviewerAgent:
             return self._sanitize_question(content) or None
         return self._sanitize_question(str(payload.get("question") or "")) or None
 
+    REVIEW_SYSTEM_PROMPT = """
+你是一名资深 Java 后端技术面试官，也是一名面试复盘教练。下面是一场已经结束的模拟面试中若干轮的问答记录。
+
+请对每一轮候选人的回答进行复盘，严格对应轮次编号，逐轮输出，不要遗漏，也不要输出记录中不存在的轮次。
+
+每轮复盘包含：
+1. evaluation：对候选人该轮回答的简短客观评价，指出亮点与不足，100 字以内。
+2. reference_points：3~5 条该轮问题的参考答题要点，必须围绕该轮具体问题生成，不得使用通用模板。
+3. sample_answer：针对该轮问题的一段参考回答，200 字以内，必须与该轮问题对应。
+4. level：good / normal / weak 三选一。
+
+你必须只输出严格 JSON，不要输出 Markdown。JSON 格式：
+{
+  "reviews": {
+    "1": {
+      "evaluation": "...",
+      "reference_points": ["...", "..."],
+      "sample_answer": "...",
+      "level": "good"
+    },
+    "2": { ... }
+  }
+}
+""".strip()
+
+    def generate_reviews_for_session(
+        self,
+        job_role: str,
+        direction: str | None,
+        interviewer_mode: str | None,
+        resume_text: str | None,
+        history: list[dict[str, str]],
+        rounds: list[int],
+    ) -> dict[int, AnswerReview]:
+        """Generate answer reviews in batches of 5 rounds per LLM call."""
+        reviews: dict[int, AnswerReview] = {}
+        for batch_start in range(0, len(rounds), 5):
+            batch_rounds = rounds[batch_start : batch_start + 5]
+            messages = [
+                {"role": "system", "content": self.REVIEW_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        f"面试岗位：{job_role}\n"
+                        f"面试方向：{direction or 'FULL_MOCK'}\n"
+                        f"面试官模式：{interviewer_mode or 'NORMAL'}\n\n"
+                        f"候选人简历：\n{resume_text or '未提供简历'}\n\n"
+                        "本批需要复盘的问答记录：\n"
+                        f"{self._format_review_batch(history, batch_rounds)}\n\n"
+                        "请为以上每一轮候选人的回答生成复盘。"
+                    ),
+                },
+            ]
+            content = self._llm_client.chat(messages)
+            reviews.update(self._parse_review_payload(content))
+        return reviews
+
+    def _format_review_batch(self, history: list[dict[str, str]], rounds: list[int]) -> str:
+        target = set(rounds)
+        lines: list[str] = []
+        for item in history:
+            role = item.get("role", "UNKNOWN")
+            if role not in {"AI_INTERVIEWER", "USER_CANDIDATE"}:
+                continue
+            try:
+                round_no = int(item.get("round_no"))
+            except (TypeError, ValueError):
+                continue
+            if round_no not in target:
+                continue
+            content = item.get("content", "")
+            display_role = "面试官" if role == "AI_INTERVIEWER" else "候选人"
+            lines.append(f"[round={round_no}] {display_role}：{content}")
+        return "\n".join(lines) if lines else "本批暂无问答记录。"
+
+    def _parse_review_payload(self, content: str) -> dict[int, AnswerReview]:
+        try:
+            payload = json.loads(self._extract_json(content))
+        except json.JSONDecodeError:
+            return {}
+        reviews_raw = payload.get("reviews")
+        if not isinstance(reviews_raw, dict):
+            return {}
+        reviews: dict[int, AnswerReview] = {}
+        for round_key, raw in reviews_raw.items():
+            try:
+                round_no = int(round_key)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(raw, dict):
+                continue
+            evaluation = str(raw.get("evaluation") or "").strip()
+            sample_answer = str(raw.get("sample_answer") or "").strip()
+            level = str(raw.get("level") or "").strip().lower()
+            if level not in {"good", "normal", "weak"}:
+                level = "normal"
+            raw_points = raw.get("reference_points")
+            reference_points = [
+                str(item).strip()
+                for item in raw_points
+                if str(item).strip()
+            ] if isinstance(raw_points, list) else []
+            if not evaluation or not reference_points or not sample_answer:
+                continue
+            reviews[round_no] = AnswerReview(
+                evaluation=evaluation,
+                reference_points=reference_points,
+                sample_answer=sample_answer,
+                level=level,
+                raw_review_json=raw,
+            )
+        return reviews
+
     def _format_history(self, history: list[dict[str, str]]) -> str:
         if not history:
             return "暂无历史问答。"
@@ -194,7 +294,6 @@ class InterviewerAgent:
                 decision="continue",
                 question=self._sanitize_question(content),
                 reason="LLM returned non-json text",
-                answer_review=self._build_fallback_review(latest_answer),
             )
 
         decision = str(payload.get("decision", "continue")).lower()
@@ -212,7 +311,6 @@ class InterviewerAgent:
             decision=decision,
             question=question,
             reason=payload.get("reason"),
-            answer_review=self._parse_answer_review(payload.get("answer_review"), latest_answer),
         )
 
     def _parse_answer_review(

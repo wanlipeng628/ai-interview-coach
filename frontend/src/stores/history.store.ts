@@ -4,6 +4,7 @@ import {
   deleteInterviewApi,
   getInterviewReviewApi,
   listInterviewHistoryApi,
+  regenerateInterviewReviewsApi,
   updateInterviewValidityApi,
 } from '@/api/interview.api'
 import type { TrendPoint } from '@/types/dashboard'
@@ -58,8 +59,8 @@ export const useHistoryStore = defineStore('history', {
       }
     },
 
-    async fetchReview(sessionId: string) {
-      this.loadingReview = true
+    async fetchReview(sessionId: string, showLoading = true) {
+      if (showLoading) this.loadingReview = true
       this.errorMessage = ''
       try {
         const review = await getInterviewReviewApi(sessionId)
@@ -85,7 +86,7 @@ export const useHistoryStore = defineStore('history', {
         this.errorMessage = getErrorMessage(error)
         this.currentReview = null
       } finally {
-        this.loadingReview = false
+        if (showLoading) this.loadingReview = false
       }
     },
 
@@ -103,6 +104,15 @@ export const useHistoryStore = defineStore('history', {
       const record = this.records.find((item) => item.sessionId === sessionId)
       if (record) {
         record.isValid = isValid
+      }
+    },
+
+    async regenerateReview(sessionId: string) {
+      await regenerateInterviewReviewsApi(sessionId)
+      // 后台异步生成，轮询刷新复盘内容
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5000))
+        await this.fetchReview(sessionId, false)
       }
     },
   },

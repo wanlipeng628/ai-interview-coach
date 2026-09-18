@@ -124,6 +124,9 @@ export const listInterviewHistoryApi = (includeEmpty = false) =>
 export const getInterviewReviewApi = (sessionId: string) =>
   request.get<InterviewReviewResponse, InterviewReviewResponse>(`/interview/${sessionId}/review`)
 
+export const regenerateInterviewReviewsApi = (sessionId: string) =>
+  request.post<SuccessResponse, SuccessResponse>(`/interview/${sessionId}/reviews/regenerate`)
+
 export const getLatestActiveInterviewApi = () =>
   request.get<LatestActiveInterviewResponse, LatestActiveInterviewResponse>('/interview/latest-active')
 
