@@ -64,8 +64,9 @@ defineEmits<{
   select: [sessionId: string]
 }>()
 
-// 与 InterviewInfoPanel 复用同一套窄屏折叠约定：≤768px 默认收起
-const isMobile = useMediaQuery('(max-width: 768px)')
+// 折叠跟随本页单列断点（InterviewReportPage 的 ≤1180px），再被"桌面零改动"截断到 $desktop-min - 1。
+// 不要按 $mobile-max(768) 改回去：769~1023 同样是单列、列表同样压在正文上方。
+const isMobile = useMediaQuery('(max-width: 1023px)')
 const expanded = ref(false)
 
 const formatTime = (value: string) => {
@@ -143,7 +144,9 @@ h2 {
   font-weight: 800;
 }
 
-@include mobile {
+// 与 script 里的 useMediaQuery 同源：折叠跟随单列断点、被 $desktop-min 截断到 $desktop-min - 1px。
+// JS 与 SCSS 是两个真值源，改一处必须同步另一处，否则会出现"CSS 折叠了但 JS 没折叠"。
+@media (max-width: #{$desktop-min - 1px}) {
   // 职位名保留了右侧 48px 给绝对定位的分数，长职位名兜住不溢出
   .role {
     overflow-wrap: anywhere;
@@ -162,7 +165,7 @@ h2 {
     min-height: $touch-target;
   }
 
-  // 折叠后 body 内只剩 display:none 的滚动区，不收起内边距就会在标题下留一条空白
+  // 折叠态 body 内不渲染滚动区（v-if），不收起内边距就会在标题下留一条空白
   .history-card--collapsed :deep(.el-card__body) {
     padding-top: 0;
     padding-bottom: 0;
