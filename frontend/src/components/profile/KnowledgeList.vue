@@ -26,6 +26,8 @@ const tagType = (status: KnowledgeNode['status']) => {
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .knowledge-card {
   border: 0;
   border-radius: 8px;
@@ -45,5 +47,21 @@ h2 {
   display: flex;
   justify-content: space-between;
   margin-bottom: 8px;
+}
+
+@include mobile {
+  .knowledge-list {
+    gap: 14px;
+  }
+
+  .knowledge-item__top {
+    align-items: center;
+    gap: 10px;
+
+    strong {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+  }
 }
 </style>

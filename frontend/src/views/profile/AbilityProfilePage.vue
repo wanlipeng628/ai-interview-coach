@@ -32,6 +32,8 @@ const profile = useProfileStore()
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .page {
   display: grid;
   gap: 18px;
@@ -67,6 +69,32 @@ const profile = useProfileStore()
 @media (max-width: 1080px) {
   .grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@include mobile {
+  .page {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 18px;
+
+    h1 {
+      font-size: 20px;
+    }
+
+    .el-button {
+      width: 100%;
+    }
+  }
+
+  .grid {
+    gap: 12px;
   }
 }
 </style>
