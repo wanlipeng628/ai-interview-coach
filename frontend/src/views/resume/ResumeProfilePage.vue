@@ -117,6 +117,8 @@ const handleUpload = async (options: UploadRequestOptions) => {
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .page {
   display: grid;
   gap: 18px;
@@ -192,6 +194,38 @@ const handleUpload = async (options: UploadRequestOptions) => {
 @media (max-width: 1080px) {
   .content {
     grid-template-columns: 1fr;
+  }
+}
+
+@include mobile {
+  .page {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+    padding: 18px;
+
+    h1 {
+      font-size: 20px;
+    }
+  }
+
+  .header-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+
+    .el-button {
+      width: 100%;
+    }
+  }
+
+  .content {
+    gap: 12px;
   }
 }
 </style>

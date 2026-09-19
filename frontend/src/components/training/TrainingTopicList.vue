@@ -77,6 +77,8 @@ const getSeverityText = (severity: string) => {
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .task-card {
   border: 0;
   border-radius: 8px;
@@ -133,6 +135,31 @@ h2 {
 @media (max-width: 760px) {
   .task {
     grid-template-columns: 1fr;
+  }
+}
+
+@include mobile {
+  .task {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .task__title {
+    align-items: flex-start;
+    gap: 8px;
+
+    strong {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+  }
+
+  .task__actions .el-button {
+    width: 100%;
+  }
+
+  .source-actions {
+    flex-wrap: wrap;
   }
 }
 </style>

@@ -164,6 +164,8 @@ const handleStart = async () => {
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .prepare-page {
   min-height: 100vh;
   display: grid;
@@ -250,6 +252,61 @@ const handleStart = async () => {
 @media (max-width: 1080px) {
   .prepare-page {
     grid-template-columns: 1fr;
+  }
+}
+
+@include mobile {
+  .prepare-page {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .prepare-panel {
+    padding: 18px;
+  }
+
+  .headline {
+    margin-bottom: 18px;
+
+    h1 {
+      font-size: 22px;
+    }
+  }
+
+  // 开关与「维护简历」同排，简历名称独占一行，避免长标题把按钮挤成竖排
+  .resume-box {
+    flex-wrap: wrap;
+    gap: 10px;
+
+    .el-button {
+      order: 1;
+      margin-left: auto;
+    }
+
+    > span {
+      order: 2;
+      flex: 1 1 100%;
+    }
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+
+    .el-button {
+      width: 100%;
+      margin-left: 0;
+    }
+  }
+
+  .tips {
+    padding: 18px;
+  }
+
+  // 分段选择器在窄屏补足触控高度
+  :deep(.el-segmented) {
+    min-height: $touch-target;
   }
 }
 </style>

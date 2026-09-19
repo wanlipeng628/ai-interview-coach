@@ -17,6 +17,8 @@ defineProps<{ plan: TrainingPlan }>()
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .plan-card {
   border: 0;
   border-radius: 8px;
@@ -43,5 +45,17 @@ span {
   display: flex;
   gap: 18px;
   margin-top: 22px;
+}
+
+@include mobile {
+  h1 {
+    font-size: 21px;
+  }
+
+  .meta {
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    margin-top: 16px;
+  }
 }
 </style>

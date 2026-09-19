@@ -187,6 +187,8 @@ onMounted(async () => {
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .detail-page {
   display: grid;
   gap: 18px;
@@ -347,6 +349,71 @@ onMounted(async () => {
 @media (max-width: 1080px) {
   .training-layout {
     grid-template-columns: 1fr;
+  }
+}
+
+@include mobile {
+  .detail-page {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 18px;
+
+    h1 {
+      font-size: 20px;
+    }
+  }
+
+  .header-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+
+    .el-button {
+      width: 100%;
+      margin-left: 0;
+    }
+  }
+
+  .training-layout {
+    gap: 12px;
+    min-height: auto;
+  }
+
+  .chat-panel {
+    min-height: 480px;
+  }
+
+  .message-list {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .message {
+    max-width: 88%;
+  }
+
+  .answer-box {
+    padding: 14px;
+  }
+
+  .answer-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+
+    .el-button {
+      width: 100%;
+    }
+  }
+
+  .panel {
+    padding: 16px;
   }
 }
 </style>
