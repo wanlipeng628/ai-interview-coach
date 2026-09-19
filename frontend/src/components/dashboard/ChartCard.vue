@@ -21,6 +21,8 @@ defineProps<{
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .chart-card {
   height: 100%;
   border: 0;
@@ -44,6 +46,22 @@ defineProps<{
     margin: 6px 0 0;
     color: #667085;
     font-size: 13px;
+  }
+}
+
+@include mobile {
+  // 标题与 extra 插槽在窄屏并排会被挤到卡片外，允许换行并让标题块可收缩
+  .card-header {
+    flex-wrap: wrap;
+    gap: 8px;
+
+    > div:first-child {
+      min-width: 0;
+    }
+
+    h2 {
+      font-size: 16px;
+    }
   }
 }
 </style>

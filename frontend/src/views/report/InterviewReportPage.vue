@@ -132,6 +132,8 @@ onMounted(async () => {
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .page {
   display: grid;
   gap: 18px;
@@ -180,6 +182,52 @@ onMounted(async () => {
   .workspace,
   .grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@include mobile {
+  .page {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  // 标题与「重新生成报告」按钮并排时在 375px 会顶到边缘，改为纵向堆叠、按钮占满整行
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 14px;
+
+    > div {
+      min-width: 0;
+    }
+
+    // h1 由 job_role 拼成，超长英文 token 会顶宽 .page 的 auto 轨道，进而撑出横向滚动条
+    h1 {
+      font-size: 20px;
+      overflow-wrap: anywhere;
+    }
+
+    :deep(.el-button) {
+      width: 100%;
+    }
+  }
+
+  // 单列 grid 的列宽是 1fr(=minmax(auto,1fr))，子项 min-content 过宽会顶出横向滚动条
+  .workspace,
+  .detail,
+  .grid {
+    gap: 12px;
+
+    > * {
+      min-width: 0;
+    }
+  }
+
+  // 错误/生成中提示的文案来自后端 detail，同样兜住超长 token
+  :deep(.el-alert__title),
+  :deep(.el-alert__description) {
+    overflow-wrap: anywhere;
   }
 }
 </style>

@@ -22,6 +22,8 @@ defineProps<{ insights: ReportInsight[] }>()
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .insight-card {
   border: 0;
   border-radius: 8px;
@@ -35,5 +37,13 @@ h2 {
 .insights {
   display: grid;
   gap: 12px;
+}
+
+@include mobile {
+  // el-alert 自带样式没有断词，分析文案里的超长 token 会顶出卡片
+  .insights :deep(.el-alert__title),
+  .insights :deep(.el-alert__description) {
+    overflow-wrap: anywhere;
+  }
 }
 </style>
