@@ -1,13 +1,33 @@
 <template>
-  <el-card shadow="never" class="history-card">
+  <el-card
+    v-if="!isMobile || reports.length > 0"
+    shadow="never"
+    class="history-card"
+    :class="{ 'history-card--collapsed': isMobile && !expanded }"
+  >
     <template #header>
       <div class="header">
         <h2>历史报告</h2>
         <el-tag>{{ reports.length }} 份</el-tag>
+        <!-- 折叠入口只在窄屏渲染，桌面端 #header 内仍只有 h2 + 计数标签，保持像素级一致 -->
+        <el-button
+          v-if="isMobile"
+          class="header__toggle"
+          link
+          type="primary"
+          :aria-expanded="expanded"
+          @click="expanded = !expanded"
+        >
+          {{ expanded ? '收起' : '展开' }}
+          <el-icon>
+            <component :is="expanded ? ArrowUp : ArrowDown" />
+          </el-icon>
+        </el-button>
       </div>
     </template>
 
-    <el-scrollbar height="calc(100vh - 238px)">
+    <!-- 窄屏默认收起：历史列表在 DOM 顺序上先于报告正文，展开态会把它顶出首屏 -->
+    <el-scrollbar v-if="!isMobile || expanded" height="calc(100vh - 238px)">
       <el-skeleton v-if="loading" :rows="5" animated />
       <el-empty v-else-if="reports.length === 0" description="暂无历史报告" />
       <button
@@ -28,6 +48,10 @@
 </template>
 
 <script setup lang="ts">
+import { ArrowDown, ArrowUp } from '@element-plus/icons-vue'
+import { ref } from 'vue'
+
+import { useMediaQuery } from '@/composables/useMediaQuery'
 import type { ReportListItem } from '@/types/report'
 
 defineProps<{
@@ -39,6 +63,10 @@ defineProps<{
 defineEmits<{
   select: [sessionId: string]
 }>()
+
+// 与 InterviewInfoPanel 复用同一套窄屏折叠约定：≤768px 默认收起
+const isMobile = useMediaQuery('(max-width: 768px)')
+const expanded = ref(false)
 
 const formatTime = (value: string) => {
   if (!value) return '未知时间'
@@ -119,6 +147,25 @@ h2 {
   // 职位名保留了右侧 48px 给绝对定位的分数，长职位名兜住不溢出
   .role {
     overflow-wrap: anywhere;
+  }
+
+  .header {
+    gap: 8px;
+  }
+
+  // 计数标签紧贴右侧折叠入口，避免 h2 / 标签 / 按钮三分天下
+  .header :deep(.el-tag) {
+    margin-left: auto;
+  }
+
+  .header__toggle {
+    min-height: $touch-target;
+  }
+
+  // 折叠后 body 内只剩 display:none 的滚动区，不收起内边距就会在标题下留一条空白
+  .history-card--collapsed :deep(.el-card__body) {
+    padding-top: 0;
+    padding-bottom: 0;
   }
 }
 </style>
