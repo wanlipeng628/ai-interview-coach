@@ -17,6 +17,8 @@ defineProps<{ summary: ReportSummary }>()
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .summary-card {
   border: 0;
   border-radius: 8px;
@@ -49,5 +51,21 @@ p {
 .conclusion {
   display: block;
   line-height: 1.7;
+}
+
+@include mobile {
+  // 64px 在 375px 屏上过重，收紧到与卡片标题同级的视觉节奏；允许换行防止评级标签顶出
+  .score-line {
+    flex-wrap: wrap;
+  }
+
+  .score {
+    font-size: 48px;
+  }
+
+  // 结论文案来自模型输出，可能含超长英文 token，兜住不溢出
+  .conclusion {
+    overflow-wrap: anywhere;
+  }
 }
 </style>

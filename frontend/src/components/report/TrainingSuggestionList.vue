@@ -22,6 +22,8 @@ defineProps<{ suggestions: TrainingSuggestion[] }>()
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .suggestion-card {
   border: 0;
   border-radius: 8px;
@@ -54,6 +56,22 @@ h2 {
     margin: 6px 0 0;
     color: #667085;
     line-height: 1.6;
+  }
+}
+
+@include mobile {
+  // 标签列 92px 在 375px 屏上占比过高，收窄给正文留出空间
+  .suggestion {
+    grid-template-columns: 76px minmax(0, 1fr);
+
+    > div {
+      min-width: 0;
+    }
+
+    strong,
+    p {
+      overflow-wrap: anywhere;
+    }
   }
 }
 </style>

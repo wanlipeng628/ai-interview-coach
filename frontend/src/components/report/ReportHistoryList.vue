@@ -54,6 +54,8 @@ const formatTime = (value: string) => {
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .history-card {
   border: 0;
   border-radius: 8px;
@@ -111,5 +113,12 @@ h2 {
   right: 14px;
   color: #e26a2c;
   font-weight: 800;
+}
+
+@include mobile {
+  // 职位名保留了右侧 48px 给绝对定位的分数，长职位名兜住不溢出
+  .role {
+    overflow-wrap: anywhere;
+  }
 }
 </style>

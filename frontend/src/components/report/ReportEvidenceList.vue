@@ -49,6 +49,8 @@ const getImpactText = (impact: string) => {
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .evidence-card {
   border: 0;
   border-radius: 8px;
@@ -95,6 +97,23 @@ section {
     margin: 0;
     color: #344054;
     line-height: 1.7;
+  }
+}
+
+@include mobile {
+  // 标题与影响标签在窄屏并排会互相顶，允许换行；问答正文来自模型输出，兜住超长 token
+  .evidence__header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .evidence {
+    padding: 12px;
+
+    strong,
+    p {
+      overflow-wrap: anywhere;
+    }
   }
 }
 </style>
