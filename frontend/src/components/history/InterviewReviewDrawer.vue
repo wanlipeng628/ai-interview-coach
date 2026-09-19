@@ -1,7 +1,7 @@
 <template>
   <el-drawer
     :model-value="visible"
-    size="58%"
+    :size="drawerSize"
     title="面试详情"
     @close="$emit('close')"
   >
@@ -70,6 +70,9 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+
+import { useMediaQuery } from '@/composables/useMediaQuery'
 import type { InterviewReview } from '@/types/history'
 
 defineProps<{
@@ -78,6 +81,10 @@ defineProps<{
   regenerating: boolean
   review: InterviewReview | null
 }>()
+
+// 移动端近全宽，桌面端保持改造前的 58%
+const isMobile = useMediaQuery('(max-width: 768px)')
+const drawerSize = computed(() => (isMobile.value ? '100%' : '58%'))
 
 defineEmits<{
   close: []
@@ -98,6 +105,8 @@ const getLevelText = (level: string) => {
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .review {
   display: grid;
   gap: 18px;
@@ -161,5 +170,25 @@ const getLevelText = (level: string) => {
   padding: 12px;
   border-radius: 8px;
   background: #fff7ed;
+}
+
+// 抽屉近全宽后，summary 的两栏并排会把岗位名和按钮挤在一行；改为上下排布
+@include mobile {
+  .summary {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px;
+
+    h2 {
+      font-size: 18px;
+    }
+  }
+
+  .actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
 }
 </style>
