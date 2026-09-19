@@ -110,6 +110,8 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+@use '../../assets/styles/responsive' as *;
+
 .page {
   display: grid;
   gap: 18px;
@@ -133,6 +135,32 @@ onMounted(() => {
   h1 {
     margin: 0;
     font-size: 24px;
+  }
+}
+
+@include mobile {
+  .page {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .page-header {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 16px;
+
+    h1 {
+      font-size: 20px;
+    }
+  }
+
+  // 图表卡片是 grid item，默认 min-width:auto 会被 echarts canvas 的像素宽度撑开
+  .page > * {
+    min-width: 0;
+  }
+
+  :deep(.base-chart) {
+    overflow: hidden;
   }
 }
 </style>
