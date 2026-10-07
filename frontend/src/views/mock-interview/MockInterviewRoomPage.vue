@@ -5,21 +5,25 @@
     </aside>
 
     <main class="center-pane">
-      <div class="room-header">
-        <el-button
-          v-if="isMobile"
-          class="room-header__back"
-          text
-          :icon="ArrowLeft"
-          aria-label="返回面试准备页"
-          @click="router.push('/mock-interview')"
-        />
-        <div>
-          <p>AI 模拟面试</p>
-          <h1>{{ interview.info.jobRole }}</h1>
-        </div>
-        <el-tag size="large" effect="light">聊天式面试</el-tag>
-      </div>
+      <PageHeader
+        variant="toolbar"
+        eyebrow="AI 模拟面试"
+        :title="interview.info.jobRole"
+      >
+        <template #leading>
+          <el-button
+            v-if="isMobile"
+            class="room-header__back"
+            text
+            :icon="ArrowLeft"
+            aria-label="返回面试准备页"
+            @click="router.push('/mock-interview')"
+          />
+        </template>
+        <template #actions>
+          <el-tag size="large" effect="light">聊天式面试</el-tag>
+        </template>
+      </PageHeader>
 
       <InterviewChatPanel :messages="interview.messages" />
       <el-alert
@@ -45,6 +49,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import PageHeader from '@/components/common/PageHeader.vue'
 import InterviewChatPanel from '@/components/interview/InterviewChatPanel.vue'
 import InterviewInfoPanel from '@/components/interview/InterviewInfoPanel.vue'
 import InterviewInputBar from '@/components/interview/InterviewInputBar.vue'
@@ -136,28 +141,6 @@ onBeforeUnmount(() => {
   gap: 16px;
 }
 
-.room-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px 20px;
-  border-radius: 8px;
-  background: #fff;
-
-  p {
-    margin: 0 0 6px;
-    color: #2f6bff;
-    font-weight: 700;
-  }
-
-  h1 {
-    margin: 0;
-    color: #101828;
-    font-size: 22px;
-  }
-}
-
 @media (max-width: 1280px) {
   .interview-page {
     height: auto;
@@ -186,7 +169,7 @@ onBeforeUnmount(() => {
     gap: 10px;
     padding: 10px;
     padding-bottom: calc(10px + #{$safe-bottom});
-    background: #f5f7fb;
+    background: var(--c-bg-page);
     overflow: hidden;
   }
 
@@ -198,23 +181,6 @@ onBeforeUnmount(() => {
     flex: 1;
     gap: 10px;
     min-height: 0;
-  }
-
-  .room-header {
-    gap: 10px;
-    padding: 12px 14px;
-
-    > div {
-      flex: 1;
-      min-width: 0;
-    }
-
-    h1 {
-      font-size: 17px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
   }
 
   .room-header__back {

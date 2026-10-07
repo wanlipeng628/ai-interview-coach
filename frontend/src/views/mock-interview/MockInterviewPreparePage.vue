@@ -1,11 +1,12 @@
 <template>
   <div class="prepare-page">
-    <section class="prepare-panel">
-      <div class="headline">
-        <p>AI 模拟面试</p>
-        <h1>开始前先确认面试配置</h1>
-        <span>选择方向、模式和时长后再创建会话，避免重复产生无效记录。</span>
-      </div>
+    <section class="prepare-panel card card--float">
+      <PageHeader
+        variant="plain"
+        eyebrow="AI 模拟面试"
+        title="开始前先确认面试配置"
+        description="选择方向、模式和时长后再创建会话，避免重复产生无效记录。"
+      />
 
       <el-alert
         v-if="interview.latestActive?.hasActive"
@@ -73,10 +74,10 @@
       </el-form>
     </section>
 
-    <aside class="tips">
+    <aside class="tips card card--tint">
       <h2>开始前确认</h2>
       <ul>
-        <li>点击“开始新面试”后才会创建新的面试记录。</li>
+        <li>点击"开始新面试"后才会创建新的面试记录。</li>
         <li>面试中不展示评分和参考答案，结束后统一复盘。</li>
         <li>如果只是测试流程，结束后可以在历史页删除无效记录。</li>
       </ul>
@@ -89,6 +90,7 @@ import { onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
+import PageHeader from '@/components/common/PageHeader.vue'
 import { useInterviewStore } from '@/stores/interview.store'
 import { useResumeStore } from '@/stores/resume.store'
 
@@ -174,38 +176,12 @@ const handleStart = async () => {
   padding: 24px;
 }
 
-.prepare-panel,
-.tips {
-  border-radius: 8px;
-  background: #fff;
-}
-
 .prepare-panel {
   padding: 28px;
 }
 
-.headline {
-  margin-bottom: 22px;
-
-  p {
-    margin: 0 0 8px;
-    color: #2f6bff;
-    font-weight: 800;
-  }
-
-  h1 {
-    margin: 0 0 10px;
-    color: #101828;
-    font-size: 28px;
-  }
-
-  span {
-    color: #667085;
-  }
-}
-
 .active-alert {
-  margin-bottom: 20px;
+  margin: 20px 0;
 }
 
 .form {
@@ -221,7 +197,7 @@ const handleStart = async () => {
   align-items: center;
   gap: 12px;
   width: 100%;
-  color: #475467;
+  color: var(--c-text-secondary);
 }
 
 .actions {
@@ -237,6 +213,7 @@ const handleStart = async () => {
   h2 {
     margin: 0 0 16px;
     font-size: 18px;
+    font-weight: 600;
   }
 
   ul {
@@ -244,7 +221,7 @@ const handleStart = async () => {
     gap: 12px;
     padding-left: 18px;
     margin: 0;
-    color: #667085;
+    color: var(--c-text-tertiary);
     line-height: 1.7;
   }
 }
@@ -263,14 +240,6 @@ const handleStart = async () => {
 
   .prepare-panel {
     padding: 18px;
-  }
-
-  .headline {
-    margin-bottom: 18px;
-
-    h1 {
-      font-size: 22px;
-    }
   }
 
   // 开关与「维护简历」同排，简历名称独占一行，避免长标题把按钮挤成竖排

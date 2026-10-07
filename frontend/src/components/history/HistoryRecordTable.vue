@@ -1,5 +1,5 @@
 <template>
-  <el-card shadow="never" class="history-card">
+  <el-card shadow="never" class="history-card card card--float">
     <template #header><h2>面试记录</h2></template>
 
     <!-- 桌面端（≥769px）：保持原有 el-table 结构 -->
@@ -16,12 +16,12 @@
       </el-table-column>
       <el-table-column label="状态" width="120">
         <template #default="{ row }">
-          <el-tag :type="getStatusTagType(row)">{{ row.statusText }}</el-tag>
+          <el-tag :type="getStatusTagType(row)" effect="light">{{ row.statusText }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="有效" width="90">
         <template #default="{ row }">
-          <el-tag :type="row.isValid ? 'success' : 'info'">
+          <el-tag :type="row.isValid ? 'success' : 'info'" effect="light">
             {{ row.isValid ? '有效' : '无效' }}
           </el-tag>
         </template>
@@ -64,7 +64,7 @@
       <article v-for="row in records" :key="row.sessionId" class="record-card">
         <header class="record-card__head">
           <h3>{{ row.jobRole || '未命名岗位' }}</h3>
-          <el-tag :type="getStatusTagType(row)" size="small">{{ row.statusText }}</el-tag>
+          <el-tag :type="getStatusTagType(row)" effect="light" size="small">{{ row.statusText }}</el-tag>
         </header>
 
         <dl class="record-card__meta">
@@ -94,7 +94,7 @@
             </strong>
             <span v-else class="muted">-</span>
           </span>
-          <el-tag :type="row.isValid ? 'success' : 'info'" size="small">
+          <el-tag :type="row.isValid ? 'success' : 'info'" effect="light" size="small">
             {{ row.isValid ? '有效' : '无效' }}
           </el-tag>
         </div>
@@ -200,26 +200,27 @@ const getModeText = (value?: string | null) => {
 </script>
 
 <style scoped lang="scss">
-.history-card {
-  border: 0;
-  border-radius: 8px;
-}
+@use '../../assets/styles/responsive' as *;
 
-h2 {
-  margin: 0;
-  font-size: 17px;
+.history-card {
+  h2 {
+    margin: 0;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+  }
 }
 
 strong {
-  color: #17a568;
+  color: var(--c-success-text);
+  font-weight: 600;
 }
 
 .low {
-  color: #e26a2c;
+  color: var(--c-danger-text);
 }
 
 .muted {
-  color: #98a2b3;
+  color: var(--c-text-quaternary);
 }
 
 .record-cards {
@@ -231,9 +232,9 @@ strong {
   display: grid;
   gap: 12px;
   padding: 14px;
-  border: 1px solid #eef2f7;
-  border-radius: 8px;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg-card);
 
   &__head {
     display: flex;
@@ -244,6 +245,7 @@ strong {
     h3 {
       margin: 0;
       font-size: 16px;
+      font-weight: 600;
       line-height: 1.4;
       word-break: break-word;
     }
@@ -263,12 +265,12 @@ strong {
     dt {
       flex: none;
       width: 56px;
-      color: #667085;
+      color: var(--c-text-tertiary);
     }
 
     dd {
       margin: 0;
-      color: #101828;
+      color: var(--c-text-primary);
       word-break: break-word;
     }
   }
@@ -277,7 +279,7 @@ strong {
     display: flex;
     align-items: center;
     gap: 12px;
-    color: #667085;
+    color: var(--c-text-tertiary);
     font-size: 13px;
 
     strong {
@@ -286,7 +288,8 @@ strong {
 
     // 轮数与分数同为 strong，轮数回到正文色，只有分数保留绿色
     .count {
-      color: #101828;
+      color: var(--c-text-primary);
+      font-weight: 600;
     }
   }
 

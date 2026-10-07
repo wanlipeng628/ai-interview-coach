@@ -1,12 +1,11 @@
 <template>
   <div class="page">
-    <header class="page-header">
-      <div>
-        <p>我的简历</p>
-        <h1>维护默认面试简历</h1>
-        <span>这份简历会在开始模拟面试时自动作为 AI 面试官的上下文。</span>
-      </div>
-      <div class="header-actions">
+    <PageHeader
+      eyebrow="我的简历"
+      title="维护默认面试简历"
+      description="这份简历会在开始模拟面试时自动作为 AI 面试官的上下文。"
+    >
+      <template #actions>
         <el-upload
           :show-file-list="false"
           :before-upload="beforeUpload"
@@ -19,11 +18,11 @@
           </el-button>
         </el-upload>
         <el-button :loading="resume.saving" type="primary" @click="handleSave">保存简历</el-button>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <section class="content">
-      <el-card shadow="never" class="editor-card">
+      <el-card shadow="never" class="editor-card card card--float">
         <el-form label-position="top">
           <el-form-item label="简历标题">
             <el-input v-model="form.title" maxlength="128" />
@@ -41,13 +40,13 @@
         </el-form>
       </el-card>
 
-      <el-card shadow="never" class="summary-card">
+      <el-card shadow="never" class="summary-card card card--float">
         <template #header><h2>简历摘要</h2></template>
         <el-skeleton v-if="resume.loading" :rows="4" animated />
         <el-empty v-else-if="!resume.profile" description="暂未保存默认简历" />
         <div v-else class="summary">
           <p>{{ resume.profile.summary || '暂无摘要' }}</p>
-          <span>更新时间：{{ resume.profile.updateTime || '-' }}</span>
+          <span>更新时间：{{ formatTime(resume.profile.updateTime) }}</span>
         </div>
       </el-card>
     </section>
@@ -60,6 +59,7 @@ import { ElMessage } from 'element-plus'
 import { Upload } from '@element-plus/icons-vue'
 import type { UploadRequestOptions } from 'element-plus'
 
+import PageHeader from '@/components/common/PageHeader.vue'
 import { useResumeStore } from '@/stores/resume.store'
 
 const resume = useResumeStore()
@@ -81,6 +81,13 @@ watch(
     form.content = profile.content
   },
 )
+
+const formatTime = (value?: string) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('zh-CN')
+}
 
 const handleSave = async () => {
   if (!form.content.trim()) {
@@ -125,46 +132,10 @@ const handleUpload = async (options: UploadRequestOptions) => {
   padding: 24px;
 }
 
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 24px;
-  border-radius: 8px;
-  background: #fff;
-
-  .header-actions {
-    display: flex;
-    gap: 12px;
-  }
-
-  p {
-    margin: 0 0 8px;
-    color: #2f6bff;
-    font-weight: 800;
-  }
-
-  h1 {
-    margin: 0 0 8px;
-    font-size: 24px;
-  }
-
-  span {
-    color: #667085;
-  }
-}
-
 .content {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 18px;
-}
-
-.editor-card,
-.summary-card {
-  border: 0;
-  border-radius: 8px;
 }
 
 .summary-card {
@@ -172,7 +143,8 @@ const handleUpload = async (options: UploadRequestOptions) => {
 
   h2 {
     margin: 0;
-    font-size: 17px;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
   }
 }
 
@@ -182,12 +154,13 @@ const handleUpload = async (options: UploadRequestOptions) => {
 
   p {
     margin: 0;
-    color: #344054;
+    color: var(--c-text-secondary);
     line-height: 1.8;
   }
 
   span {
-    color: #667085;
+    color: var(--c-text-tertiary);
+    font-size: var(--fs-sm);
   }
 }
 
@@ -201,27 +174,6 @@ const handleUpload = async (options: UploadRequestOptions) => {
   .page {
     gap: 12px;
     padding: 14px;
-  }
-
-  .page-header {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 14px;
-    padding: 18px;
-
-    h1 {
-      font-size: 20px;
-    }
-  }
-
-  .header-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-
-    .el-button {
-      width: 100%;
-    }
   }
 
   .content {

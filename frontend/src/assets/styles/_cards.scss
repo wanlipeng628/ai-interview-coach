@@ -1,0 +1,97 @@
+// ============================================================
+// 卡片变体系统
+// ============================================================
+// 三档变体 + is-emphasis 修饰符：
+//   .card--float  浮卡：白底 / 无描边 / sh-md  —— 主内容区卡片
+//   .card--flat   平卡：白底 / 1px 描边 / 无阴影 —— 列表区、次级内容
+//   .card--tint   衬卡：浅底 / 无描边 / 无阴影 —— 嵌入内容的衬底
+//   .is-emphasis  强调：r-lg + sh-lg + 更大内距 —— 每页限 1 个
+//
+// 使用方式：给 el-card 或自定义容器加 class="card card--float"
+// 选择器写成双类（.card.card--float）以压过 EP 的 .el-card，
+// 不依赖 import 顺序。
+// ============================================================
+@use './tokens' as *;
+@use './responsive' as *;
+
+.card {
+  &.card--float {
+    border: 0;
+    border-radius: var(--r-md);
+    background: var(--c-bg-card);
+    box-shadow: var(--sh-md);
+  }
+
+  &.card--flat {
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-bg-card);
+    box-shadow: none;
+  }
+
+  &.card--tint {
+    border: 0;
+    border-radius: var(--r-md);
+    background: var(--c-bg-tint);
+    box-shadow: none;
+  }
+
+  // 强调修饰符：大圆角 + 大阴影 + 更厚内距
+  &.is-emphasis {
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-lg);
+
+    :deep(.el-card__header) {
+      padding: 28px 28px 0;
+      border-bottom: 0;
+    }
+
+    :deep(.el-card__body) {
+      padding: 28px;
+    }
+  }
+}
+
+// 卡片 header 的统一排版（h2 标题 + 右侧 extra）
+.card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+
+  h2 {
+    margin: 0;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+    color: var(--c-text-primary);
+  }
+
+  p {
+    margin: 6px 0 0;
+    font-size: var(--fs-sm);
+    color: var(--c-text-tertiary);
+  }
+}
+
+// —— 移动端：卡片内边距收紧到 14px，与页面内容区节奏一致 ——
+@include mobile {
+  .card {
+    :deep(.el-card__header) {
+      padding: 14px;
+    }
+
+    :deep(.el-card__body) {
+      padding: 14px;
+    }
+
+    &.is-emphasis {
+      :deep(.el-card__header) {
+        padding: 18px 18px 0;
+      }
+
+      :deep(.el-card__body) {
+        padding: 18px;
+      }
+    }
+  }
+}

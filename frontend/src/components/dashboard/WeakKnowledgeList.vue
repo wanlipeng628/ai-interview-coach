@@ -1,7 +1,7 @@
 <template>
-  <el-card shadow="never" class="weak-card">
+  <el-card shadow="never" class="weak-card card card--float">
     <template #header>
-      <div class="header">
+      <div class="card__header">
         <h2>Top5 薄弱知识点</h2>
         <el-button link type="primary">查看训练</el-button>
       </div>
@@ -38,19 +38,20 @@ const tagType = (level: WeakKnowledgePoint['riskLevel']) => {
 
 <style scoped lang="scss">
 .weak-card {
-  border: 0;
-  border-radius: 8px;
-  box-shadow: 0 12px 30px rgba(19, 34, 66, 0.05);
+  height: 100%;
 }
 
-.header {
+.card__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
 
   h2 {
     margin: 0;
-    font-size: 17px;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+    color: var(--c-text-primary);
   }
 }
 
@@ -65,7 +66,7 @@ const tagType = (level: WeakKnowledgePoint['riskLevel']) => {
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 14px;
-  border-bottom: 1px solid #eef2f7;
+  border-bottom: 1px solid var(--c-border-light);
 
   &:last-child {
     padding-bottom: 0;
@@ -75,13 +76,15 @@ const tagType = (level: WeakKnowledgePoint['riskLevel']) => {
   &__content {
     display: grid;
     gap: 5px;
+    min-width: 0;
 
     strong {
-      color: #101828;
+      color: var(--c-text-primary);
+      font-weight: 600;
     }
 
     span {
-      color: #667085;
+      color: var(--c-text-tertiary);
       font-size: 13px;
     }
   }
@@ -90,11 +93,13 @@ const tagType = (level: WeakKnowledgePoint['riskLevel']) => {
     display: flex;
     align-items: center;
     gap: 10px;
+    flex-shrink: 0;
 
     b {
       min-width: 28px;
       text-align: right;
-      color: #344054;
+      color: var(--c-text-secondary);
+      font-weight: 600;
     }
   }
 }

@@ -1,14 +1,16 @@
 <template>
   <div class="page">
-    <header class="page-header">
-      <div>
-        <p>面试历史</p>
-        <h1>历史记录与报告入口</h1>
-      </div>
-      <el-button type="primary" @click="router.push('/mock-interview')">
-        开始新面试
-      </el-button>
-    </header>
+    <PageHeader
+      eyebrow="面试历史"
+      title="历史记录与报告入口"
+      description="查看过往模拟面试记录，复盘面试过程，生成详细分析报告。"
+    >
+      <template #actions>
+        <el-button type="primary" @click="router.push('/mock-interview')">
+          开始新面试
+        </el-button>
+      </template>
+    </PageHeader>
 
     <el-alert
       v-if="history.errorMessage"
@@ -51,6 +53,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 import LineTrendChart from '@/components/charts/LineTrendChart.vue'
 import ChartCard from '@/components/dashboard/ChartCard.vue'
+import PageHeader from '@/components/common/PageHeader.vue'
 import HistoryRecordTable from '@/components/history/HistoryRecordTable.vue'
 import InterviewReviewDrawer from '@/components/history/InterviewReviewDrawer.vue'
 import { useHistoryStore } from '@/stores/history.store'
@@ -118,40 +121,10 @@ onMounted(() => {
   padding: 24px;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 24px;
-  border-radius: 8px;
-  background: #fff;
-
-  p {
-    margin: 0 0 8px;
-    color: #2f6bff;
-    font-weight: 800;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 24px;
-  }
-}
-
 @include mobile {
   .page {
     gap: 12px;
     padding: 14px;
-  }
-
-  .page-header {
-    flex-wrap: wrap;
-    gap: 12px;
-    padding: 16px;
-
-    h1 {
-      font-size: 20px;
-    }
   }
 
   // 图表卡片是 grid item，默认 min-width:auto 会被 echarts canvas 的像素宽度撑开

@@ -1,0 +1,142 @@
+// ============================================================
+// Element Plus 主题覆盖
+// ============================================================
+// 通过 CSS 变量覆盖 Element Plus 默认主题，接入设计 token。
+// 必须放在 element-plus/dist/index.css 之后引入（main.ts 顺序已保证）。
+// primary / success / warning / danger / info 五个语义色的派生色
+// 用 color.mix() 按 EP 官方比例现算，不手抄 40+ 个派生值。
+// ============================================================
+@use 'sass:color';
+
+@use './tokens' as *;
+
+// 将 hex 转为 rgb 三元组（用于 EP 的 -rgb 变量）
+@function rgb-values($hex) {
+  @return red($hex) green($hex) blue($hex);
+}
+
+// 按 Element Plus 官方比例生成 light/dark 系列色
+// EP 官方：light-3/5/7/8/9 分别混入 70%/50%/30%/20%/10% 白
+//         dark-2 混入 20% 黑
+@function ep-light($base, $level) {
+  $white-amount: 0;
+  @if $level == 3 { $white-amount: 70%; }
+  @else if $level == 5 { $white-amount: 50%; }
+  @else if $level == 7 { $white-amount: 30%; }
+  @else if $level == 8 { $white-amount: 20%; }
+  @else if $level == 9 { $white-amount: 10%; }
+  @return color.mix(#fff, $base, $white-amount);
+}
+
+@function ep-dark($base, $level) {
+  $black-amount: 0;
+  @if $level == 2 { $black-amount: 20%; }
+  @return color.mix(#000, $base, $black-amount);
+}
+
+// 批量生成一个语义色的所有 EP 变量
+@mixin ep-semantic($name, $base) {
+  --el-color-#{$name}: #{$base};
+  --el-color-#{$name}-light-3: #{ep-light($base, 3)};
+  --el-color-#{$name}-light-5: #{ep-light($base, 5)};
+  --el-color-#{$name}-light-7: #{ep-light($base, 7)};
+  --el-color-#{$name}-light-8: #{ep-light($base, 8)};
+  --el-color-#{$name}-light-9: #{ep-light($base, 9)};
+  --el-color-#{$name}-dark-2: #{ep-dark($base, 2)};
+  --el-color-#{$name}-rgb: #{rgb-values($base)};
+}
+
+:root {
+  // —— 主色：品牌蓝 ——
+  @include ep-semantic(primary, $c-primary-500);
+
+  // —— 语义色 ——
+  @include ep-semantic(success, $c-success);
+  @include ep-semantic(warning, $c-warning);
+  @include ep-semantic(danger,  $c-danger);
+  @include ep-semantic(error,   $c-danger);   // EP 同时用 danger 和 error
+  @include ep-semantic(info,    $c-info);
+
+  // —— 文本 ——
+  --el-text-color-primary:   #{$c-text-primary};
+  --el-text-color-regular:   #{$c-text-secondary};
+  --el-text-color-secondary: #{$c-text-tertiary};
+  --el-text-color-placeholder: #{$c-text-quaternary};
+  --el-text-color-disabled:  #{$c-text-quaternary};
+
+  // —— 边框 ——
+  --el-border-color:        #{$c-border};
+  --el-border-color-light:  #{$c-border-light};
+  --el-border-color-lighter: #{$c-border-lighter};
+  --el-border-color-extra-light: #{$c-bg-hover};
+
+  // —— 填充 / 背景 ——
+  --el-fill-color:         #{$c-bg-tint};
+  --el-fill-color-light:   #{$c-bg-hover};
+  --el-fill-color-lighter: #{$c-bg-tint};
+  --el-fill-color-extra-light: #{$c-bg-page};
+  --el-fill-color-blank:   #{$c-bg-card};
+
+  --el-bg-color:           #{$c-bg-page};
+  --el-bg-color-page:      #{$c-bg-page};
+  --el-bg-color-overlay:   #{$c-bg-card};
+
+  // —— 圆角 ——
+  --el-border-radius-base:  #{$r-md};
+  --el-border-radius-small: #{$r-sm};
+  --el-border-radius-round: 9999px;
+  --el-border-radius-circle: 50%;
+
+  // —— 阴影 ——
+  --el-box-shadow:      #{$sh-md};
+  --el-box-shadow-light: #{$sh-sm};
+  --el-box-shadow-lighter: 0 1px 2px rgba(0, 0, 0, 0.03);
+  --el-box-shadow-dark:  #{$sh-lg};
+
+  // —— 字体 ——
+  --el-font-size-base:   #{$fs-base};
+  --el-font-size-extra-small: #{$fs-xs};
+  --el-font-size-small:  #{$fs-sm};
+  --el-font-size-medium: #{$fs-md};
+  --el-font-size-large:  #{$fs-lg};
+  --el-font-size-extra-large: #{$fs-xl};
+  --el-font-weight-primary: #{$fw-semibold};
+
+  // —— 间距 ——
+  --el-component-size: 32px;
+  --el-component-size-small: 24px;
+  --el-component-size-large: 40px;
+}
+
+// —— EP 卡片：统一无默认边框、无边框头部分隔线 ——
+// 卡片变体由 .card--* 类负责（见 _cards.scss），
+// 这里只重置 EP 默认的"贴纸感"边框。
+:root {
+  --el-card-border-color: transparent;
+  --el-card-border-radius: var(--r-md);
+}
+
+// —— Tag 组件：light 模式接入 token 浅底 ——
+.el-tag--light {
+  &.el-tag--success {
+    --el-tag-bg-color: var(--c-success-light);
+    --el-tag-text-color: var(--c-success-text);
+    --el-tag-border-color: transparent;
+  }
+  &.el-tag--warning {
+    --el-tag-bg-color: var(--c-warning-light);
+    --el-tag-text-color: var(--c-warning-text);
+    --el-tag-border-color: transparent;
+  }
+  &.el-tag--danger,
+  &.el-tag--error {
+    --el-tag-bg-color: var(--c-danger-light);
+    --el-tag-text-color: var(--c-danger-text);
+    --el-tag-border-color: transparent;
+  }
+  &.el-tag--info {
+    --el-tag-bg-color: var(--c-info-light);
+    --el-tag-text-color: var(--c-info-text);
+    --el-tag-border-color: transparent;
+  }
+}

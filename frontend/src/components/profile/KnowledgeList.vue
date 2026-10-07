@@ -1,11 +1,11 @@
 <template>
-  <el-card shadow="never" class="knowledge-card">
+  <el-card shadow="never" class="knowledge-card card card--float">
     <template #header><h2>知识点掌握情况</h2></template>
     <div class="knowledge-list">
       <div v-for="item in items" :key="item.name" class="knowledge-item">
         <div class="knowledge-item__top">
           <strong>{{ item.name }}</strong>
-          <el-tag :type="tagType(item.status)">{{ item.status }}</el-tag>
+          <el-tag :type="tagType(item.status)" effect="light">{{ item.status }}</el-tag>
         </div>
         <el-progress :percentage="item.score" :stroke-width="8" />
       </div>
@@ -29,13 +29,11 @@ const tagType = (status: KnowledgeNode['status']) => {
 @use '../../assets/styles/responsive' as *;
 
 .knowledge-card {
-  border: 0;
-  border-radius: 8px;
-}
-
-h2 {
-  margin: 0;
-  font-size: 17px;
+  h2 {
+    margin: 0;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+  }
 }
 
 .knowledge-list {
@@ -47,6 +45,13 @@ h2 {
   display: flex;
   justify-content: space-between;
   margin-bottom: 8px;
+  align-items: center;
+  gap: 10px;
+
+  strong {
+    color: var(--c-text-primary);
+    font-weight: 600;
+  }
 }
 
 @include mobile {
@@ -55,9 +60,6 @@ h2 {
   }
 
   .knowledge-item__top {
-    align-items: center;
-    gap: 10px;
-
     strong {
       min-width: 0;
       overflow-wrap: anywhere;

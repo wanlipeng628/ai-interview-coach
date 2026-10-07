@@ -1,7 +1,7 @@
 <template>
   <el-card
     shadow="never"
-    class="info-panel"
+    class="info-panel card card--float"
     :class="{ 'info-panel--collapsed': isMobile && !expanded }"
   >
     <template #header>
@@ -63,14 +63,10 @@ const formattedDuration = computed(() => {
 <style scoped lang="scss">
 @use '../../assets/styles/responsive' as *;
 
-.info-panel {
-  border: 0;
-  border-radius: 8px;
-}
-
-h2 {
-  margin: 0;
-  font-size: 17px;
+.info-panel.card {
+  h2 {
+    margin: 0;
+  }
 }
 
 .info-list {
@@ -83,13 +79,13 @@ h2 {
   }
 
   span {
-    color: #667085;
+    color: var(--c-text-tertiary);
     font-size: 13px;
   }
 
   strong {
-    color: #101828;
-    font-size: 18px;
+    color: var(--c-text-primary);
+    font-size: var(--fs-xl);
   }
 }
 

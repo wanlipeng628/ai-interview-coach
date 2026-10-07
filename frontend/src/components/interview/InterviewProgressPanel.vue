@@ -1,5 +1,5 @@
 <template>
-  <el-card shadow="never" class="progress-panel">
+  <el-card shadow="never" class="progress-panel card card--float">
     <template #header>
       <h2>面试进度</h2>
     </template>
@@ -29,29 +29,23 @@ defineProps<{
 </script>
 
 <style scoped lang="scss">
-.progress-panel {
+.progress-panel.card {
   height: 100%;
-  border: 0;
-  border-radius: 8px;
+
+  h2 {
+    margin: 0;
+  }
 }
 
-h2,
 h3 {
   margin: 0;
-}
-
-h2 {
-  font-size: 17px;
-}
-
-h3 {
   font-size: 15px;
-  color: #344054;
+  color: var(--c-text-secondary);
 }
 
 .summary {
   margin: 12px 0 22px;
-  color: #667085;
+  color: var(--c-text-tertiary);
   font-size: 13px;
 }
 
@@ -65,17 +59,17 @@ h3 {
   grid-template-columns: 34px 1fr;
   gap: 10px;
   padding: 12px;
-  border-radius: 8px;
-  background: #f7f9fd;
+  border-radius: var(--r-md);
+  background: var(--c-bg-tint);
 
   span {
-    color: #2f6bff;
-    font-weight: 800;
+    color: var(--c-primary-500);
+    font-weight: var(--fw-bold);
   }
 
   p {
     margin: 0;
-    color: #344054;
+    color: var(--c-text-secondary);
     font-size: 13px;
     line-height: 1.5;
   }

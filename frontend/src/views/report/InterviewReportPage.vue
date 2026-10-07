@@ -1,19 +1,21 @@
 <template>
   <div class="page">
-    <header class="page-header">
-      <div>
-        <p>面试报告</p>
-        <h1>{{ currentTitle }}</h1>
-      </div>
-      <el-button
-        :disabled="!report.currentSessionId"
-        :loading="report.generating"
-        type="primary"
-        @click="handleRegenerate"
-      >
-        重新生成报告
-      </el-button>
-    </header>
+    <PageHeader
+      eyebrow="面试报告"
+      :title="currentTitle"
+      description="基于面试过程的能力分析、薄弱点识别与训练建议。"
+    >
+      <template #actions>
+        <el-button
+          :disabled="!report.currentSessionId"
+          :loading="report.generating"
+          type="primary"
+          @click="handleRegenerate"
+        >
+          重新生成报告
+        </el-button>
+      </template>
+    </PageHeader>
 
     <el-alert
       v-if="report.generating"
@@ -74,6 +76,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import AbilityRadarChart from '@/components/charts/AbilityRadarChart.vue'
 import ChartCard from '@/components/dashboard/ChartCard.vue'
+import PageHeader from '@/components/common/PageHeader.vue'
 import ReportEvidenceList from '@/components/report/ReportEvidenceList.vue'
 import ReportHistoryList from '@/components/report/ReportHistoryList.vue'
 import ReportInsightList from '@/components/report/ReportInsightList.vue'
@@ -140,26 +143,6 @@ onMounted(async () => {
   padding: 24px;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 24px;
-  border-radius: 8px;
-  background: #fff;
-
-  p {
-    margin: 0 0 8px;
-    color: #2f6bff;
-    font-weight: 800;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 24px;
-  }
-}
-
 .workspace {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
@@ -189,28 +172,6 @@ onMounted(async () => {
   .page {
     gap: 12px;
     padding: 14px;
-  }
-
-  // 标题与「重新生成报告」按钮并排时在 375px 会顶到边缘，改为纵向堆叠、按钮占满整行
-  .page-header {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-    padding: 14px;
-
-    > div {
-      min-width: 0;
-    }
-
-    // h1 由 job_role 拼成，超长英文 token 会顶宽 .page 的 auto 轨道，进而撑出横向滚动条
-    h1 {
-      font-size: 20px;
-      overflow-wrap: anywhere;
-    }
-
-    :deep(.el-button) {
-      width: 100%;
-    }
   }
 
   // 单列 grid 的列宽是 1fr(=minmax(auto,1fr))，子项 min-content 过宽会顶出横向滚动条

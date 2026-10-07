@@ -1,11 +1,10 @@
 <template>
   <div class="detail-page">
-    <header class="page-header">
-      <div>
-        <p>专项训练</p>
-        <h1>{{ training.currentTask?.title || '训练详情' }}</h1>
-      </div>
-      <div class="header-actions">
+    <PageHeader
+      eyebrow="专项训练"
+      :title="training.currentTask?.title || '训练详情'"
+    >
+      <template #actions>
         <el-button @click="router.push('/training')">返回列表</el-button>
         <el-button
           :disabled="training.isFinished || !training.currentSessionId"
@@ -15,8 +14,8 @@
         >
           结束训练
         </el-button>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <el-alert
       v-if="training.errorMessage"
@@ -27,7 +26,7 @@
     />
 
     <main v-loading="training.loading" class="training-layout">
-      <section class="chat-panel">
+      <section class="chat-panel card card--float">
         <div ref="scrollRef" class="message-list">
           <article
             v-for="message in visibleMessages"
@@ -66,7 +65,7 @@
       </section>
 
       <aside class="side-panel">
-        <section class="panel">
+        <section class="panel card card--float">
           <h2>训练信息</h2>
           <dl>
             <dt>优先级</dt>
@@ -92,7 +91,7 @@
           <p>{{ training.currentTask?.reason || '围绕该薄弱点进行问答训练，补齐概念、流程和项目表达。' }}</p>
         </section>
 
-        <section class="panel">
+        <section class="panel card card--float">
           <h2>本轮反馈</h2>
           <el-empty v-if="!latestReview.feedback" description="提交回答后展示反馈" />
           <template v-else>
@@ -115,6 +114,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
+import PageHeader from '@/components/common/PageHeader.vue'
 import { useTrainingStore } from '@/stores/training.store'
 
 const route = useRoute()
@@ -195,42 +195,11 @@ onMounted(async () => {
   padding: 24px;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 24px;
-  border-radius: 8px;
-  background: #fff;
-
-  p {
-    margin: 0 0 8px;
-    color: #2f6bff;
-    font-weight: 800;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 24px;
-  }
-}
-
-.header-actions {
-  display: flex;
-  gap: 10px;
-}
-
 .training-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 18px;
   min-height: 680px;
-}
-
-.chat-panel,
-.panel {
-  border-radius: 8px;
-  background: #fff;
 }
 
 .chat-panel {
@@ -255,25 +224,25 @@ onMounted(async () => {
     justify-self: end;
 
     .message__content {
-      background: #2f6bff;
-      color: #fff;
+      background: var(--c-primary-500);
+      color: var(--c-text-inverse);
     }
   }
 
   &--ai .message__content {
-    background: #f2f4f7;
-    color: #101828;
+    background: var(--c-bg-tint);
+    color: var(--c-text-primary);
   }
 
   &__role {
     margin-bottom: 6px;
-    color: #667085;
+    color: var(--c-text-tertiary);
     font-size: 13px;
   }
 
   &__content {
     padding: 12px 14px;
-    border-radius: 8px;
+    border-radius: var(--r-md);
     line-height: 1.7;
     white-space: pre-wrap;
   }
@@ -283,7 +252,7 @@ onMounted(async () => {
   display: grid;
   gap: 12px;
   padding: 16px;
-  border-top: 1px solid #eaecf0;
+  border-top: 1px solid var(--c-border-light);
 }
 
 .answer-actions {
@@ -291,7 +260,7 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  color: #667085;
+  color: var(--c-text-tertiary);
   font-size: 13px;
 }
 
@@ -307,16 +276,18 @@ onMounted(async () => {
   h2 {
     margin: 0 0 16px;
     font-size: 18px;
+    font-weight: 600;
   }
 
   h3 {
     margin: 18px 0 8px;
     font-size: 15px;
+    font-weight: 600;
   }
 
   p {
     margin: 0;
-    color: #475467;
+    color: var(--c-text-secondary);
     line-height: 1.7;
   }
 
@@ -325,7 +296,7 @@ onMounted(async () => {
     gap: 8px;
     margin: 0;
     padding-left: 18px;
-    color: #475467;
+    color: var(--c-text-secondary);
     line-height: 1.6;
   }
 
@@ -337,12 +308,12 @@ onMounted(async () => {
   }
 
   dt {
-    color: #98a2b3;
+    color: var(--c-text-quaternary);
   }
 
   dd {
     margin: 0;
-    color: #101828;
+    color: var(--c-text-primary);
   }
 }
 
@@ -356,28 +327,6 @@ onMounted(async () => {
   .detail-page {
     gap: 12px;
     padding: 14px;
-  }
-
-  .page-header {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-    padding: 18px;
-
-    h1 {
-      font-size: 20px;
-    }
-  }
-
-  .header-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-
-    .el-button {
-      width: 100%;
-      margin-left: 0;
-    }
   }
 
   .training-layout {

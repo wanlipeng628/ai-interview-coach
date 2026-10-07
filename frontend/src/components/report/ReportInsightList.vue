@@ -1,5 +1,5 @@
 <template>
-  <el-card shadow="never" class="insight-card">
+  <el-card shadow="never" class="insight-card card card--float">
     <template #header><h2>表现总结</h2></template>
     <div class="insights">
       <el-alert
@@ -25,13 +25,11 @@ defineProps<{ insights: ReportInsight[] }>()
 @use '../../assets/styles/responsive' as *;
 
 .insight-card {
-  border: 0;
-  border-radius: 8px;
-}
-
-h2 {
-  margin: 0;
-  font-size: 17px;
+  h2 {
+    margin: 0;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+  }
 }
 
 .insights {

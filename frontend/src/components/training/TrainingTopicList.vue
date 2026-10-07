@@ -1,5 +1,5 @@
 <template>
-  <el-card shadow="never" class="task-card">
+  <el-card shadow="never" class="task-card card card--float">
     <template #header><h2>训练任务</h2></template>
     <el-empty
       v-if="tasks.length === 0"
@@ -10,7 +10,7 @@
         <div>
           <div class="task__title">
             <strong>{{ task.title }}</strong>
-            <el-tag :type="getSeverityType(task.severity)">
+            <el-tag :type="getSeverityType(task.severity)" effect="light">
               {{ getSeverityText(task.severity) }}
             </el-tag>
           </div>
@@ -25,7 +25,7 @@
             >
               查看报告
             </el-button>
-            <el-tag v-else type="info">报告不可用</el-tag>
+            <el-tag v-else type="info" effect="light">报告不可用</el-tag>
           </div>
         </div>
 
@@ -80,13 +80,11 @@ const getSeverityText = (severity: string) => {
 @use '../../assets/styles/responsive' as *;
 
 .task-card {
-  border: 0;
-  border-radius: 8px;
-}
-
-h2 {
-  margin: 0;
-  font-size: 17px;
+  h2 {
+    margin: 0;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+  }
 }
 
 .tasks {
@@ -99,13 +97,18 @@ h2 {
   grid-template-columns: 1fr 220px;
   gap: 16px;
   padding: 16px;
-  border-radius: 8px;
-  background: #f7f9fd;
+  border-radius: var(--r-md);
+  background: var(--c-bg-tint);
 
   &__title {
     display: flex;
     align-items: center;
     gap: 10px;
+
+    strong {
+      color: var(--c-text-primary);
+      font-weight: 600;
+    }
   }
 
   &__actions {
@@ -116,7 +119,7 @@ h2 {
 
   p {
     margin: 8px 0;
-    color: #475467;
+    color: var(--c-text-secondary);
     line-height: 1.7;
   }
 }
@@ -125,7 +128,8 @@ h2 {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #98a2b3;
+  color: var(--c-text-quaternary);
+  font-size: 13px;
 }
 
 .status {

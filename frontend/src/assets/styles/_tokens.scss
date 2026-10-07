@@ -1,0 +1,231 @@
+// ============================================================
+// 设计系统 Token —— 唯一真值源
+// ============================================================
+// 所有色值/圆角/阴影/间距/字号字重集中在此定义。
+// 组件和页面样式必须通过 SCSS 变量或 CSS 变量引用，
+// 不允许在组件 scoped 样式里硬编码裸 hex / rgb。
+// ============================================================
+
+// ——————————————————————————————————
+// 色板 · 品牌色（primary）
+// 基准 #2f6bff
+// ——————————————————————————————————
+$c-primary-50:  #eef3ff;  // 最浅底（hover 填充、标签底）
+$c-primary-100: #dae5ff;
+$c-primary-200: #b9cdff;
+$c-primary-300: #89abff;
+$c-primary-400: #5c8bff;
+$c-primary-500: #2f6bff;  // 基准 = 品牌色
+$c-primary-600: #1f55db;
+$c-primary-700: #1842b0;
+$c-primary-800: #143488;
+$c-primary-900: #0f2866;
+
+// ——————————————————————————————————
+// 色板 · 文本
+// ——————————————————————————————————
+$c-text-primary:    #101828;  // 标题/正文主色  对比度(白底) 15.8:1
+$c-text-secondary:  #475467;  // 次级说明/元信息  7.4:1
+$c-text-tertiary:   #667085;  // 占位/辅助文案    4.8:1
+$c-text-quaternary: #98a2b3;  // 禁用/弱化说明    2.9:1（仅用于纯装饰性）
+
+// ——————————————————————————————————
+// 色板 · 语义色（图形档 + 文本档）
+// 文本档保证白底 AA（≥4.5:1）；图形档用于标签底、进度条、面积图等大面积
+// ——————————————————————————————————
+
+// Success · 绿
+$c-success:       #17a568;  // 图形档（按钮/图标）
+$c-success-light: #e7f7ef;  // 浅底（标签/提示背景）
+$c-success-text:  #067647;  // 文本档（白底 14px AA+ = 7.1:1）
+
+// Warning · 橙
+$c-warning:       #f59e0b;  // 图形档
+$c-warning-light: #fef3c7;  // 浅底
+$c-warning-text:  #b54708;  // 文本档（白底 14px AA = 5.4:1）
+
+// Danger · 红橙
+$c-danger:        #e26a2c;  // 图形档（低分/警示）
+$c-danger-light:  #feece3;  // 浅底
+$c-danger-text:   #b42318;  // 文本档（白底 14px AA+ = 7.0:1）
+
+// Info · 蓝灰（中性提示）
+$c-info:          #2e90fa;
+$c-info-light:    #eff8ff;
+$c-info-text:     #175cd3;
+
+// ——————————————————————————————————
+// 色板 · 面（背景）
+// ——————————————————————————————————
+$c-bg-page:    #f5f7fb;  // 页面底色
+$c-bg-card:    #ffffff;  // 卡片底
+$c-bg-tint:    #f7f9fc;  // 衬卡底（次级内容区）
+$c-bg-hover:   #f2f4f7;  // hover 行/项
+$c-bg-disabled: #f9fafb;
+
+// ——————————————————————————————————
+// 色板 · 线（描边/分隔）
+// ——————————————————————————————————
+$c-border:        #e4e7ec;  // 主描边（卡片/输入框）
+$c-border-light:  #f2f4f7;  // 细分隔线（列表项之间）
+$c-border-lighter: #f9fafb; // 极细分隔
+
+// ——————————————————————————————————
+// 色板 · 深色底（侧栏/暗色区域）
+// ——————————————————————————————————
+$c-dark-bg:       #0e1629;  // 侧栏底色
+$c-dark-bg-soft:  #1a2340;  // 侧栏悬浮/分组
+$c-dark-border:   #263451;  // 侧栏分隔
+$c-dark-text:     #e9eefc;  // 侧栏主文本
+$c-dark-text-sec: #b8c2dd;  // 侧栏次级文本
+$c-dark-text-mute:#8d98b4;  // 侧栏弱化文本
+
+// ——————————————————————————————————
+// 色板 · 图表扩展色
+// ——————————————————————————————————
+$c-chart-purple: #7a5af8;
+$c-chart-pink:   #ee46bc;
+$c-chart-teal:   #0891b2;
+
+// ============================================================
+// 圆角
+// ============================================================
+$r-sm:  6px;   // 小元素（标签、小按钮）
+$r-md:  8px;   // 默认（卡片、按钮、输入框）—— 与现状一致
+$r-lg:  12px;  // 强调卡（首页欢迎区、总分卡）—— is-emphasis 修饰符
+$r-xl:  16px;  // 留档备用，当前未使用
+
+// ============================================================
+// 阴影
+// ============================================================
+$sh-sm: 0 1px 2px rgba(16, 24, 40, 0.04);    // 细微抬升（hover 态）
+$sh-md: 0 4px 12px rgba(16, 24, 40, 0.06);   // 标准浮卡
+$sh-lg: 0 12px 30px rgba(19, 34, 66, 0.08);  // 强调卡 / 抽屉
+$sh-xl: 0 20px 48px rgba(19, 34, 66, 0.12);  // 模态框
+
+// ============================================================
+// 间距（4px 基数）
+// ============================================================
+$sp-1:  4px;
+$sp-2:  8px;
+$sp-3:  12px;
+$sp-4:  16px;
+$sp-5:  20px;
+$sp-6:  24px;
+$sp-8:  32px;
+$sp-10: 40px;
+
+// ============================================================
+// 字阶（16px = 1rem 基准）
+// ============================================================
+$fs-xs:   12px;  // 辅助标注、标签
+$fs-sm:   13px;  // 元信息、说明行
+$fs-base: 14px;  // 正文默认
+$fs-md:   15px;  // 次级标题、列表项
+$fs-lg:   17px;  // 卡片标题 h2
+$fs-xl:   20px;  // 页头 h1（移动端）
+$fs-2xl:  24px;  // 页头 h1（桌面端）
+$fs-3xl:  28px;  // 首页欢迎区标题
+$fs-4xl:  48px;  // 报告总分（移动端）
+$fs-5xl:  64px;  // 报告总分（桌面端）
+
+// 字重（收敛为 3 档；中文 700/800 视觉差异可忽略，统一用 700）
+$fw-regular:  400;
+$fw-semibold: 600;
+$fw-bold:     700;
+
+// ============================================================
+// CSS 变量导出（供运行时 JS / ECharts / 第三方组件读取）
+// ============================================================
+:root {
+  // 品牌色
+  --c-primary-50:  #{$c-primary-50};
+  --c-primary-100: #{$c-primary-100};
+  --c-primary-200: #{$c-primary-200};
+  --c-primary-300: #{$c-primary-300};
+  --c-primary-400: #{$c-primary-400};
+  --c-primary-500: #{$c-primary-500};
+  --c-primary-600: #{$c-primary-600};
+  --c-primary-700: #{$c-primary-700};
+  --c-primary-800: #{$c-primary-800};
+  --c-primary-900: #{$c-primary-900};
+
+  // 文本
+  --c-text-primary:    #{$c-text-primary};
+  --c-text-secondary:  #{$c-text-secondary};
+  --c-text-tertiary:   #{$c-text-tertiary};
+  --c-text-quaternary: #{$c-text-quaternary};
+
+  // 语义色
+  --c-success:       #{$c-success};
+  --c-success-light: #{$c-success-light};
+  --c-success-text:  #{$c-success-text};
+  --c-warning:       #{$c-warning};
+  --c-warning-light: #{$c-warning-light};
+  --c-warning-text:  #{$c-warning-text};
+  --c-danger:        #{$c-danger};
+  --c-danger-light:  #{$c-danger-light};
+  --c-danger-text:   #{$c-danger-text};
+  --c-info:          #{$c-info};
+  --c-info-light:    #{$c-info-light};
+  --c-info-text:     #{$c-info-text};
+
+  // 面
+  --c-bg-page:  #{$c-bg-page};
+  --c-bg-card:  #{$c-bg-card};
+  --c-bg-tint:  #{$c-bg-tint};
+  --c-bg-hover: #{$c-bg-hover};
+
+  // 线
+  --c-border:       #{$c-border};
+  --c-border-light: #{$c-border-light};
+
+  // 深色底
+  --c-dark-bg:       #{$c-dark-bg};
+  --c-dark-border:   #{$c-dark-border};
+  --c-dark-text:     #{$c-dark-text};
+  --c-dark-text-sec: #{$c-dark-text-sec};
+  --c-dark-text-mute:#{$c-dark-text-mute};
+
+  // 图表扩展色
+  --c-chart-purple: #{$c-chart-purple};
+  --c-chart-pink:   #{$c-chart-pink};
+  --c-chart-teal:   #{$c-chart-teal};
+
+  // 反色文本（深色底上的白字）
+  --c-text-inverse: #ffffff;
+
+  // 圆角
+  --r-sm: #{$r-sm};
+  --r-md: #{$r-md};
+  --r-lg: #{$r-lg};
+
+  // 阴影
+  --sh-sm: #{$sh-sm};
+  --sh-md: #{$sh-md};
+  --sh-lg: #{$sh-lg};
+
+  // 间距
+  --sp-1: #{$sp-1};
+  --sp-2: #{$sp-2};
+  --sp-3: #{$sp-3};
+  --sp-4: #{$sp-4};
+  --sp-5: #{$sp-5};
+  --sp-6: #{$sp-6};
+  --sp-8: #{$sp-8};
+
+  // 字阶
+  --fs-xs:   #{$fs-xs};
+  --fs-sm:   #{$fs-sm};
+  --fs-base: #{$fs-base};
+  --fs-md:   #{$fs-md};
+  --fs-lg:   #{$fs-lg};
+  --fs-xl:   #{$fs-xl};
+  --fs-2xl:  #{$fs-2xl};
+  --fs-3xl:  #{$fs-3xl};
+
+  // 字重
+  --fw-regular:  #{$fw-regular};
+  --fw-semibold: #{$fw-semibold};
+  --fw-bold:     #{$fw-bold};
+}
