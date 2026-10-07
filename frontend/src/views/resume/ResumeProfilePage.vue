@@ -21,6 +21,16 @@
       </template>
     </PageHeader>
 
+    <el-alert class="assistant-entry" type="info" show-icon :closable="false">
+      <template #title>不会写？让 AI 引导你生成简历</template>
+      <div class="assistant-entry__body">
+        <span>通过几轮对话梳理你的经历，自动整理成一份结构化简历。</span>
+        <el-button type="primary" :icon="MagicStick" @click="router.push('/resume-assistant')">
+          开始引导
+        </el-button>
+      </div>
+    </el-alert>
+
     <section class="content">
       <el-card shadow="never" class="editor-card card card--float">
         <el-form label-position="top">
@@ -55,13 +65,15 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Upload } from '@element-plus/icons-vue'
+import { MagicStick, Upload } from '@element-plus/icons-vue'
 import type { UploadRequestOptions } from 'element-plus'
 
 import PageHeader from '@/components/common/PageHeader.vue'
 import { useResumeStore } from '@/stores/resume.store'
 
+const router = useRouter()
 const resume = useResumeStore()
 
 const form = reactive({
@@ -138,6 +150,17 @@ const handleUpload = async (options: UploadRequestOptions) => {
   gap: 18px;
 }
 
+.assistant-entry__body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  span {
+    color: var(--c-text-secondary);
+  }
+}
+
 .summary-card {
   align-self: start;
 
@@ -178,6 +201,17 @@ const handleUpload = async (options: UploadRequestOptions) => {
 
   .content {
     gap: 12px;
+  }
+
+  .assistant-entry__body {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+
+    .el-button {
+      width: 100%;
+      margin-left: 0;
+    }
   }
 }
 </style>
