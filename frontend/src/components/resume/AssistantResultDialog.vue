@@ -32,7 +32,7 @@ import { computed, ref, watch } from 'vue'
 
 import { useMediaQuery } from '@/composables/useMediaQuery'
 import type { ResumeResult } from '@/types/resumeAssistant'
-import { renderMarkdown } from '@/utils/markdown'
+import { renderMarkdown, stripLeadingHeading } from '@/utils/markdown'
 
 const props = defineProps<{
   modelValue: boolean
@@ -49,7 +49,9 @@ const emit = defineEmits<{
 const isMobile = useMediaQuery('(max-width: 768px)')
 const saved = ref(false)
 
-const renderedContent = computed(() => renderMarkdown(props.result?.content ?? ''))
+const renderedContent = computed(() =>
+  renderMarkdown(stripLeadingHeading(props.result?.content ?? '')),
+)
 
 watch(
   () => props.result,

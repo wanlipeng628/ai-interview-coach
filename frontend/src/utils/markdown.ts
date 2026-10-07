@@ -9,8 +9,11 @@ const renderInline = (value: string) =>
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
 
-export const renderMarkdown = (markdown: string): string => {
-  const lines = escapeHtml(markdown ?? '').split(/\r?\n/)
+// 结果弹层已单独展示简历标题，去掉正文开头重复的一级标题（仅匹配 `# `，不误伤 `## `）
+export const stripLeadingHeading = (markdown: string) =>
+  (markdown ?? '').replace(/^\s*#\s[^\n]*\r?\n+/, '')
+
+export const renderMarkdown = (markdown: string): string => {  const lines = escapeHtml(markdown ?? '').split(/\r?\n/)
   const html: string[] = []
   let listType: 'ul' | 'ol' | null = null
 

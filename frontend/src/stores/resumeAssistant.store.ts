@@ -22,6 +22,7 @@ import type {
 import { RESUME_SECTIONS } from '@/types/resumeAssistant'
 
 import { uuid } from '@/utils/uuid'
+import { isFinalizeRequest } from '@/utils/finalizeIntent'
 
 interface ResumeAssistantState {
   draftId: string
@@ -38,15 +39,20 @@ interface ResumeAssistantState {
   result: ResumeResult | null
 }
 
-// 用户以自然语言要求生成时，跳过本轮问答直接生成
-const FINALIZE_PATTERN = /帮我生成|生成简历|生成吧|生成出来|可以生成/
-
-// 后端 /api/resume/assistant/* 未就绪（404/405）或不可达时回退到本地演示数据
+// 后端 /api/resume/assistant/* 未实现（404/405）、进程不可达（网络错误），
+// 或 Vite 代理在上游未启动时返回的 5xx（生产 nginx 为 502），都视为不可用
 const isBackendUnavailable = (error: unknown): boolean => {
   if (typeof error !== 'object' || error === null) return false
-  const response = (error as { response?: { status?: number } }).response
-  if (!response) return true
-  return response.status === 404 || response.status === 405
+  const status = (error as { response?: { status?: number } }).response?.status
+  if (!status) return true
+  return status === 404 || status === 405 || status >= 500
+}
+
+const normalizeSections = (value: unknown): ResumeSection[] => {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => String(item).toUpperCase())
+    .filter((key): key is ResumeSection => RESUME_SECTIONS.some((item) => item.key === key))
 }
 
 const getErrorMessage = (error: unknown, fallback: string) => {
@@ -81,8 +87,6 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
   }),
 
   getters: {
-    progressPercent: (state) =>
-      Math.round((state.progress.completed.length / RESUME_SECTIONS.length) * 100),
     busy: (state) => state.starting || state.submitting || state.finalizing,
   },
 
@@ -108,8 +112,8 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
 
     applyProgress(progress: AssistantProgress) {
       this.progress = {
-        completed: progress?.completed ?? [],
-        current: progress?.current ?? this.stage,
+        completed: normalizeSections(progress?.completed),
+        current: toStage(progress?.current, 'BASIC'),
       }
       this.stage = this.progress.current
     },
@@ -194,13 +198,19 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
     async sendAnswer(raw: string) {
       const text = raw.trim()
       if (!text || this.busy) return
-      this.pushUserMessage(text)
 
-      if (FINALIZE_PATTERN.test(text)) {
-        await this.finalize()
+      // 生成指令不当作回答提交，而是把用户的注意力引到「生成简历」按钮上
+      if (isFinalizeRequest(text)) {
+        this.pushUserMessage(text)
+        this.pushAiMessage(
+          this.readyToFinalize
+            ? '好的，点击下方「生成简历」按钮即可生成你的简历。'
+            : '还有几个分节没补充完，把剩下的聊完就能生成简历啦。',
+        )
         return
       }
 
+      this.pushUserMessage(text)
       this.submitting = true
       this.errorMessage = ''
       try {
@@ -263,11 +273,5 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
         return mockFinalizeResumeAssistant(this.draftId)
       }
     },
-
-    closeResult() {
-      this.result = null
-    },
   },
 })
-
-export { FINALIZE_PATTERN }
