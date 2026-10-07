@@ -13,7 +13,8 @@ const renderInline = (value: string) =>
 export const stripLeadingHeading = (markdown: string) =>
   (markdown ?? '').replace(/^\s*#\s[^\n]*\r?\n+/, '')
 
-export const renderMarkdown = (markdown: string): string => {  const lines = escapeHtml(markdown ?? '').split(/\r?\n/)
+export const renderMarkdown = (markdown: string): string => {
+  const lines = escapeHtml(markdown ?? '').split(/\r?\n/)
   const html: string[] = []
   let listType: 'ul' | 'ol' | null = null
 

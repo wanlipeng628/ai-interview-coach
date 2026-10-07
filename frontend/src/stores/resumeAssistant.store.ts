@@ -22,7 +22,6 @@ import type {
 import { RESUME_SECTIONS } from '@/types/resumeAssistant'
 
 import { uuid } from '@/utils/uuid'
-import { isFinalizeRequest } from '@/utils/finalizeIntent'
 
 interface ResumeAssistantState {
   draftId: string
@@ -40,13 +39,20 @@ interface ResumeAssistantState {
 }
 
 // 后端 /api/resume/assistant/* 未实现（404/405）、进程不可达（网络错误），
-// 或 Vite 代理在上游未启动时返回的 5xx（生产 nginx 为 502），都视为不可用
+// 或 Vite 代理在上游未启动时返回的 5xx，都视为不可用
 const isBackendUnavailable = (error: unknown): boolean => {
   if (typeof error !== 'object' || error === null) return false
   const status = (error as { response?: { status?: number } }).response?.status
   if (!status) return true
   return status === 404 || status === 405 || status >= 500
 }
+
+// 本地演示兜底仅在开发环境启用：生产环境的 5xx（如 LLM 调用失败的 502）
+// 是真实错误，必须如实暴露，不能被演示数据掩盖。
+const MOCK_FALLBACK_ENABLED = import.meta.env.DEV
+
+const shouldFallbackToMock = (error: unknown): boolean =>
+  MOCK_FALLBACK_ENABLED && isBackendUnavailable(error)
 
 const normalizeSections = (value: unknown): ResumeSection[] => {
   if (!Array.isArray(value)) return []
@@ -59,7 +65,7 @@ const getErrorMessage = (error: unknown, fallback: string) => {
   if (typeof error === 'object' && error !== null && 'message' in error) {
     const response = (error as { response?: { status?: number; data?: { detail?: string } } }).response
     if (response?.data?.detail) return response.data.detail
-    if (isBackendUnavailable(error)) return '后端简历助手接口未就绪，已使用本地演示数据'
+    if (MOCK_FALLBACK_ENABLED && isBackendUnavailable(error)) return '后端简历助手接口未就绪，已使用本地演示数据'
   }
   return fallback
 }
@@ -113,7 +119,7 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
     applyProgress(progress: AssistantProgress) {
       this.progress = {
         completed: normalizeSections(progress?.completed),
-        current: toStage(progress?.current, 'BASIC'),
+        current: toStage(progress?.current, this.stage),
       }
       this.stage = this.progress.current
     },
@@ -149,7 +155,7 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
         this.usingMock = false
         return response
       } catch (error) {
-        if (!isBackendUnavailable(error)) throw error
+        if (!shouldFallbackToMock(error)) throw error
         this.usingMock = true
         return mockStartResumeAssistant({ target_role: targetRole, title })
       }
@@ -164,6 +170,7 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
         const detail = await this.callDetail(draftId)
         this.draftId = detail.draft_id
         this.status = detail.status
+        this.stage = toStage(detail.stage, 'BASIC')
         this.usingMock = draftId.startsWith('mock-')
         this.messages = (detail.messages ?? [])
           .filter((item) => item.content?.trim())
@@ -175,7 +182,7 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
             createdAt: item.created_at || new Date().toISOString(),
           }))
         this.applyProgress(detail.progress)
-        this.readyToFinalize = this.progress.current === 'DONE'
+        this.readyToFinalize = detail.ready_to_finalize ?? this.progress.current === 'DONE'
       } catch (error) {
         this.errorMessage = getErrorMessage(error, '无法恢复简历引导记录')
         throw error
@@ -190,7 +197,7 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
         this.usingMock = false
         return response
       } catch (error) {
-        if (!isBackendUnavailable(error) || !draftId.startsWith('mock-')) throw error
+        if (!shouldFallbackToMock(error) || !draftId.startsWith('mock-')) throw error
         return mockGetResumeAssistant(draftId)
       }
     },
@@ -199,17 +206,7 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
       const text = raw.trim()
       if (!text || this.busy) return
 
-      // 生成指令不当作回答提交，而是把用户的注意力引到「生成简历」按钮上
-      if (isFinalizeRequest(text)) {
-        this.pushUserMessage(text)
-        this.pushAiMessage(
-          this.readyToFinalize
-            ? '好的，点击下方「生成简历」按钮即可生成你的简历。'
-            : '还有几个分节没补充完，把剩下的聊完就能生成简历啦。',
-        )
-        return
-      }
-
+      // 生成指令由后端统一判定：原话照常提交，命中时后端返回 question=null + ready_to_finalize=true
       this.pushUserMessage(text)
       this.submitting = true
       this.errorMessage = ''
@@ -236,7 +233,7 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
         this.usingMock = false
         return response
       } catch (error) {
-        if (!isBackendUnavailable(error) || !this.usingMock) throw error
+        if (!shouldFallbackToMock(error) || !this.usingMock) throw error
         return mockSubmitResumeAnswer(this.draftId, answer)
       }
     },
@@ -269,7 +266,7 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
         this.usingMock = false
         return response
       } catch (error) {
-        if (!isBackendUnavailable(error) || !this.usingMock) throw error
+        if (!shouldFallbackToMock(error) || !this.usingMock) throw error
         return mockFinalizeResumeAssistant(this.draftId)
       }
     },

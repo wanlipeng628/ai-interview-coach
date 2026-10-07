@@ -52,6 +52,8 @@ export interface ResumeAssistantDetailResponse {
   stage: ResumeStage
   messages: ResumeAssistantMessageResponse[]
   sections: Record<string, unknown>
+  // 详情接口可能不带该字段（旧后端），消费端回退到 progress.current === 'DONE'
+  ready_to_finalize?: boolean
   progress: AssistantProgress
 }
 
