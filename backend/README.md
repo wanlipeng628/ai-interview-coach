@@ -27,6 +27,20 @@ Open:
 - `GET /api/resume/profile`：获取当前用户简历档案
 - `PUT /api/resume/profile`：保存当前用户简历档案
 
+### Resume Assistant（对话式引导生成简历）
+
+按固定顺序分节引导：`BASIC → EDUCATION → WORK → PROJECT → SKILL → INTENT → DONE`，
+一次只问一个问题，同一分节最多追问 2 轮，用户说「没有」跳节、说「帮我生成吧」直接结束。
+
+- `POST /api/resume/assistant/start`：开始引导，返回第一个问题（201）
+- `POST /api/resume/assistant/{draft_id}/answer`：提交回答，返回下一个问题或 `ready_to_finalize`
+- `POST /api/resume/assistant/{draft_id}/finalize`：生成 Markdown 简历并写入 `resume_profiles`（幂等）
+- `GET /api/resume/assistant/{draft_id}`：查询草稿状态（刷新 / 续聊）
+
+QA 复现脚本：`bash scripts/qa_resume_assistant.sh`（需先启动后端，依赖 curl + python）。
+
+数据表 `resume_drafts` 已同步到 `database/schema.sql` 与 `database/migrations/20261007_add_resume_drafts.sql`。
+
 ## Current scope
 
 This project currently contains infrastructure and routing skeletons only. Business logic is intentionally not implemented yet.

@@ -1,0 +1,613 @@
+import logging
+import re
+from datetime import UTC, datetime
+from uuid import uuid4
+
+from app.application.resume.resume_assistant_dto import (
+    AnswerResponse,
+    DraftDetailResponse,
+    DraftMessageResponse,
+    FinalizeResponse,
+    ProgressResponse,
+    StartDraftRequest,
+    StartDraftResponse,
+    SubmitAnswerRequest,
+)
+from app.application.resume.resume_dto import ResumeProfileResponse
+from app.domain.resume.entities import (
+    DONE_STAGE,
+    MAX_FOLLOW_UPS,
+    STAGE_ORDER,
+    ResumeDraft,
+    ResumeDraftStatus,
+    empty_sections,
+)
+from app.infrastructure.agent.resume_agent import ResumeAgent
+from app.infrastructure.repositories.resume_draft_repository import ResumeDraftRepository
+from app.infrastructure.repositories.resume_repository import ResumeRepository
+
+logger = logging.getLogger(__name__)
+
+# 各分节的开场问题（LLM 不可用时的兜底，也用作推进到新分节时的默认问题）
+STAGE_FIRST_QUESTIONS: dict[str, str] = {
+    "BASIC": "先做一个简单了解：怎么称呼你？你目前的工作年限和所在城市是什么？",
+    "EDUCATION": "接下来了解一下教育背景：你的学校、专业、学历和就读时间分别是什么？",
+    "WORK": "聊聊你的工作经历：最近一份工作是在哪家公司、担任什么职位、在职时间是什么时候？",
+    "PROJECT": "挑一个你最有代表性的项目介绍一下：这个项目是做什么的，你在里面负责哪部分？",
+    "SKILL": "你目前比较熟练的技术栈有哪些？",
+    "INTENT": "最后聊聊求职意向：你希望找什么方向或岗位，期望的城市是哪里？",
+}
+
+# 各分节的追问问题（用户回答过于简略时使用）
+STAGE_FOLLOW_UP_QUESTIONS: dict[str, str] = {
+    "BASIC": "能再具体一点吗？比如你最近一份工作的公司、职位和时间段。",
+    "EDUCATION": "能补充一下具体的就读时间段和学历/学位吗？",
+    "WORK": "这段经历里，你自己具体负责了哪部分？有没有可以量化的成果（比如提升了多少、覆盖多少人）？",
+    "PROJECT": "这个项目里你具体做了哪些部分？有没有遇到关键难点，或者可以量化的结果？",
+    "SKILL": "这些技术里你最熟练的是哪几个？分别用在什么场景、大概用了多久？",
+    "INTENT": "能具体一点吗？比如目标岗位名称、期望城市，以及有没有特别要求（行业、公司规模等）？",
+}
+
+# 分节 → sections 中的键
+STAGE_SECTION_KEY: dict[str, str] = {
+    "BASIC": "basic",
+    "EDUCATION": "education",
+    "WORK": "work",
+    "PROJECT": "projects",
+    "SKILL": "skills",
+    "INTENT": "intent",
+}
+
+DICT_SECTION_FIELDS: dict[str, list[str]] = {
+    "basic": ["name", "target_role", "years", "city"],
+    "intent": ["position", "city", "notes"],
+}
+
+LIST_SECTION_FIELDS: dict[str, tuple[str, list[str]]] = {
+    "education": ("school", ["school", "major", "degree", "period"]),
+    "work": ("company", ["company", "role", "period", "highlights"]),
+    "projects": ("name", ["name", "background", "role", "stack", "challenge", "result"]),
+}
+
+# 用户主动结束引导的触发词
+FINALIZE_KEYWORDS: tuple[str, ...] = (
+    "帮我生成",
+    "生成吧",
+    "直接生成",
+    "可以生成",
+    "够了",
+    "就这样",
+    "差不多了",
+    "不用问了",
+    "结束吧",
+    "帮我写",
+)
+
+# 用户明确表示该节没有内容的触发词
+SKIP_EXACT: frozenset[str] = frozenset(
+    {
+        "没有",
+        "无",
+        "没",
+        "暂无",
+        "无经验",
+        "跳过",
+        "不知道",
+        "不清楚",
+        "略过",
+        "没了",
+        "没有更多",
+        "没有其他",
+        "没有补充",
+        "none",
+        "skip",
+        "n/a",
+    }
+)
+SKIP_KEYWORDS: tuple[str, ...] = (
+    "跳过",
+    "略过",
+    "不知道",
+    "不清楚",
+    "没有了",
+    "暂无",
+    "没有其他",
+    "没有补充",
+)
+SKIP_PREFIXES: tuple[str, ...] = (
+    "没有",
+    "暂无",
+    "跳过",
+    "略过",
+    "不知道",
+    "不清楚",
+    "没经验",
+    "没做过",
+    "没接触",
+    "没相关",
+)
+
+
+class ResumeAssistantService:
+    """Coordinates the conversational resume guidance use case."""
+
+    def __init__(
+        self,
+        draft_repository: ResumeDraftRepository,
+        resume_repository: ResumeRepository,
+        resume_agent: ResumeAgent | None = None,
+    ) -> None:
+        self._draft_repository = draft_repository
+        self._resume_repository = resume_repository
+        self._resume_agent = resume_agent
+
+    # ------------------------------------------------------------------ 用例
+
+    def start(self, user_id: int, request: StartDraftRequest) -> StartDraftResponse:
+        """Create a draft and return the opening BASIC question."""
+        target_role = (request.target_role or "").strip() or None
+        title = (request.title or "默认简历").strip() or "默认简历"
+
+        sections = empty_sections()
+        if target_role:
+            sections["basic"]["target_role"] = target_role
+
+        question = self._first_question("BASIC", target_role)
+        draft = ResumeDraft(
+            session_id=str(uuid4()),
+            user_id=user_id,
+            status=ResumeDraftStatus.IN_PROGRESS.value,
+            stage="BASIC",
+            messages=[self._build_message("assistant", question, "BASIC")],
+            sections=sections,
+            follow_up_count=0,
+            target_role=target_role,
+            title=title,
+        )
+        self._draft_repository.create(draft)
+
+        return StartDraftResponse(
+            draft_id=draft.session_id,
+            status=draft.status,
+            stage=draft.stage,
+            question=question,
+            progress=self._progress("BASIC"),
+        )
+
+    def submit_answer(
+        self,
+        user_id: int,
+        draft_id: str,
+        request: SubmitAnswerRequest,
+    ) -> AnswerResponse:
+        """Record the user's answer and decide the next guidance step."""
+        draft = self._draft_repository.get(user_id, draft_id)
+        if draft is None:
+            raise ValueError("Resume draft not found")
+        if draft.is_completed:
+            raise ValueError("Resume draft is already completed")
+
+        answer = (request.answer or "").strip()
+        if not answer:
+            raise ValueError("Answer cannot be empty")
+
+        current_stage = draft.stage
+        draft.messages.append(self._build_message("user", answer, current_stage))
+
+        # 1. 用户主动结束：直接进入 finalize
+        if self._is_finalize_intent(answer):
+            return self._complete_draft(draft)
+
+        # 2. 用户明确跳过当前分节：标记为空并推进
+        if self._is_skip_answer(answer):
+            self._ensure_section(draft, current_stage)
+            target_stage = self._next_stage(current_stage)
+            if target_stage == DONE_STAGE:
+                return self._complete_draft(draft)
+            return self._advance_to(
+                draft,
+                target_stage,
+                question=self._first_question(target_stage, draft.target_role),
+            )
+
+        # 3. 常规回答：调用 Agent 抽取结构化信息并判断分节是否充分
+        agent_result = self._safe_generate_next_question(draft, current_stage)
+        self._merge_sections(draft.sections, current_stage, agent_result.get("merge") or {})
+
+        section_complete = bool(agent_result.get("section_complete"))
+        # 同一分节最多追问 MAX_FOLLOW_UPS 轮，超过后无论是否充分都强制推进
+        should_advance = section_complete or draft.follow_up_count >= MAX_FOLLOW_UPS
+
+        if should_advance:
+            target_stage = self._next_stage(current_stage)
+            if target_stage == DONE_STAGE:
+                return self._complete_draft(draft)
+            question = str(agent_result.get("next_section_question") or "").strip() or self._first_question(
+                target_stage, draft.target_role
+            )
+            return self._advance_to(draft, target_stage, question=question)
+
+        # 继续追问当前分节
+        draft.follow_up_count += 1
+        question = str(agent_result.get("follow_up_question") or "").strip() or self._follow_up_question(
+            current_stage
+        )
+        draft.messages.append(self._build_message("assistant", question, current_stage))
+        self._draft_repository.save(draft)
+        return AnswerResponse(
+            draft_id=draft.session_id,
+            status=draft.status,
+            stage=current_stage,
+            question=question,
+            ready_to_finalize=False,
+            progress=self._progress(current_stage),
+        )
+
+    def finalize(self, user_id: int, draft_id: str) -> FinalizeResponse:
+        """Generate the Markdown resume and persist it as the user's profile."""
+        draft = self._draft_repository.get(user_id, draft_id)
+        if draft is None:
+            raise ValueError("Resume draft not found")
+
+        # 幂等：已生成过则直接返回已保存的简历
+        if draft.profile_id is not None:
+            existing = self._resume_repository.get_by_id(user_id, draft.profile_id)
+            if existing is not None:
+                return self._to_finalize_response(draft, existing)
+
+        content = self._safe_generate_resume(draft)
+        profile = self._resume_repository.upsert_default(
+            user_id=user_id,
+            title=draft.title,
+            content=content,
+        )
+
+        draft.profile_id = profile.id
+        draft.status = ResumeDraftStatus.COMPLETED.value
+        draft.stage = DONE_STAGE
+        self._draft_repository.save(draft)
+
+        return self._to_finalize_response(draft, profile)
+
+    def get_draft(self, user_id: int, draft_id: str) -> DraftDetailResponse:
+        """Fetch full draft state for refresh / resume conversation."""
+        draft = self._draft_repository.get(user_id, draft_id)
+        if draft is None:
+            raise ValueError("Resume draft not found")
+
+        return DraftDetailResponse(
+            draft_id=draft.session_id,
+            status=draft.status,
+            stage=draft.stage,
+            messages=[
+                DraftMessageResponse(
+                    role=str(item.get("role", "")),
+                    content=str(item.get("content", "")),
+                    stage=str(item.get("stage", "")),
+                )
+                for item in draft.messages
+            ],
+            sections=draft.sections,
+            progress=self._progress(draft.stage),
+            ready_to_finalize=draft.is_completed,
+        )
+
+    # ------------------------------------------------------------- 状态流转
+
+    def _complete_draft(self, draft: ResumeDraft) -> AnswerResponse:
+        draft.status = ResumeDraftStatus.COMPLETED.value
+        draft.stage = DONE_STAGE
+        draft.follow_up_count = 0
+        self._draft_repository.save(draft)
+        return AnswerResponse(
+            draft_id=draft.session_id,
+            status=draft.status,
+            stage=DONE_STAGE,
+            question=None,
+            ready_to_finalize=True,
+            progress=self._progress(DONE_STAGE),
+        )
+
+    def _advance_to(self, draft: ResumeDraft, target_stage: str, *, question: str) -> AnswerResponse:
+        draft.stage = target_stage
+        draft.follow_up_count = 0
+        draft.messages.append(self._build_message("assistant", question, target_stage))
+        self._draft_repository.save(draft)
+        return AnswerResponse(
+            draft_id=draft.session_id,
+            status=draft.status,
+            stage=target_stage,
+            question=question,
+            ready_to_finalize=False,
+            progress=self._progress(target_stage),
+        )
+
+    def _next_stage(self, current_stage: str) -> str:
+        if current_stage in STAGE_ORDER:
+            index = STAGE_ORDER.index(current_stage)
+            if index + 1 < len(STAGE_ORDER):
+                return STAGE_ORDER[index + 1]
+        return DONE_STAGE
+
+    def _progress(self, current_stage: str) -> ProgressResponse:
+        if current_stage == DONE_STAGE or current_stage not in STAGE_ORDER:
+            return ProgressResponse(completed=list(STAGE_ORDER), current=DONE_STAGE)
+        index = STAGE_ORDER.index(current_stage)
+        return ProgressResponse(completed=list(STAGE_ORDER[:index]), current=current_stage)
+
+    # --------------------------------------------------------------- Agent 调用
+
+    def _safe_generate_next_question(self, draft: ResumeDraft, current_stage: str) -> dict:
+        """Call the LLM agent, falling back to an empty result on any failure."""
+        try:
+            agent = self._get_agent()
+            return agent.generate_next_question(
+                target_role=draft.target_role,
+                current_stage=current_stage,
+                sections=draft.sections,
+                history=draft.messages,
+                follow_up_count=draft.follow_up_count,
+            )
+        except Exception:
+            logger.exception("resume agent failed to generate next question")
+            return {}
+
+    def _safe_generate_resume(self, draft: ResumeDraft) -> str:
+        """Generate the Markdown resume, falling back to a deterministic render."""
+        try:
+            agent = self._get_agent()
+            content = agent.generate_resume(
+                sections=draft.sections,
+                target_role=draft.target_role,
+            )
+            if content and content.strip():
+                return content.strip()
+            logger.warning("resume agent returned empty content, using fallback render")
+        except Exception:
+            logger.exception("resume agent failed to generate resume, using fallback render")
+        return self._render_fallback_markdown(draft)
+
+    def _get_agent(self) -> ResumeAgent:
+        if self._resume_agent is None:
+            self._resume_agent = ResumeAgent()
+        return self._resume_agent
+
+    def _first_question(self, stage: str, target_role: str | None) -> str:
+        question = STAGE_FIRST_QUESTIONS.get(stage, "请继续补充你的经历。")
+        if stage == "BASIC" and target_role:
+            return f"先做一个简单了解：怎么称呼你？你目前的工作年限和所在城市是什么？（目标岗位：{target_role}）"
+        return question
+
+    def _follow_up_question(self, stage: str) -> str:
+        return STAGE_FOLLOW_UP_QUESTIONS.get(stage, "能再具体展开说说吗？")
+
+    # ----------------------------------------------------------- 回答意图识别
+
+    def _is_finalize_intent(self, answer: str) -> bool:
+        text = answer.strip()
+        return any(keyword in text for keyword in FINALIZE_KEYWORDS)
+
+    def _is_skip_answer(self, answer: str) -> bool:
+        text = re.sub(r"[\s，。！？、,.!?;；:：'\"“”‘’]", "", answer.lower())
+        if not text:
+            return True
+        if text in SKIP_EXACT:
+            return True
+        if len(text) <= 12 and any(keyword in text for keyword in SKIP_KEYWORDS):
+            return True
+        # 短句以否定词开头，视为明确表示该节没有内容
+        return len(text) <= 8 and text.startswith(SKIP_PREFIXES)
+
+    # ------------------------------------------------------------- 结构化合并
+
+    def _merge_sections(self, sections: dict, stage: str, merge: dict) -> None:
+        key = STAGE_SECTION_KEY.get(stage)
+        if key is None or not isinstance(merge, dict) or not merge:
+            return
+        payload = merge[key] if key in merge else merge
+        if payload is None:
+            return
+
+        if key in DICT_SECTION_FIELDS:
+            self._merge_dict_section(sections.setdefault(key, {}), payload, DICT_SECTION_FIELDS[key])
+        elif key in LIST_SECTION_FIELDS:
+            key_field, fields = LIST_SECTION_FIELDS[key]
+            self._merge_list_section(sections.setdefault(key, []), payload, key_field, fields)
+        elif key == "skills":
+            self._merge_skill_list(sections.setdefault(key, []), payload)
+
+    @staticmethod
+    def _merge_dict_section(target: dict, payload: object, allowed_fields: list[str]) -> None:
+        if not isinstance(target, dict) or not isinstance(payload, dict):
+            return
+        for field in allowed_fields:
+            value = payload.get(field)
+            if isinstance(value, str) and value.strip():
+                target[field] = value.strip()
+
+    def _merge_list_section(
+        self,
+        target: list,
+        payload: object,
+        key_field: str,
+        fields: list[str],
+    ) -> None:
+        if not isinstance(target, list):
+            return
+        if isinstance(payload, dict):
+            incoming_items = [payload]
+        elif isinstance(payload, list):
+            incoming_items = [item for item in payload if isinstance(item, dict)]
+        else:
+            return
+
+        for item in incoming_items:
+            cleaned = self._clean_list_item(item, fields)
+            if not cleaned:
+                continue
+            key_value = cleaned.get(key_field)
+            if target and (not key_value or target[-1].get(key_field) == key_value):
+                # 同一实体的补充信息，合并进最后一条
+                for field, value in cleaned.items():
+                    if field == "highlights":
+                        merged = list(target[-1].get("highlights") or [])
+                        for highlight in value:
+                            if highlight not in merged:
+                                merged.append(highlight)
+                        target[-1]["highlights"] = merged
+                    else:
+                        target[-1][field] = value
+                continue
+
+            base = {field: ([] if field == "highlights" else "") for field in fields}
+            base.update(cleaned)
+            target.append(base)
+
+    @staticmethod
+    def _clean_list_item(item: dict, fields: list[str]) -> dict:
+        cleaned: dict = {}
+        for field in fields:
+            value = item.get(field)
+            if field == "highlights":
+                highlights = [str(entry).strip() for entry in value] if isinstance(value, list) else []
+                if isinstance(value, str) and value.strip():
+                    highlights = [value.strip()]
+                highlights = [entry for entry in highlights if entry]
+                if highlights:
+                    cleaned["highlights"] = highlights
+            elif isinstance(value, str) and value.strip():
+                cleaned[field] = value.strip()
+        return cleaned
+
+    @staticmethod
+    def _merge_skill_list(target: list, payload: object) -> None:
+        if not isinstance(target, list):
+            return
+        if isinstance(payload, dict):
+            payload = payload.get("skills", [])
+        if isinstance(payload, str):
+            payload = [payload]
+        if not isinstance(payload, list):
+            return
+        for entry in payload:
+            text = str(entry).strip()
+            if text and text not in target:
+                target.append(text)
+
+    def _ensure_section(self, draft: ResumeDraft, stage: str) -> None:
+        """Ensure the current section key exists (empty default) without wiping data."""
+        key = STAGE_SECTION_KEY.get(stage)
+        if key is None:
+            return
+        defaults = empty_sections()
+        draft.sections.setdefault(key, defaults[key])
+
+    # ------------------------------------------------------------------ 渲染
+
+    def _render_fallback_markdown(self, draft: ResumeDraft) -> str:
+        """Deterministic Markdown render used when the LLM is unavailable.
+
+        It only reuses information explicitly present in sections, so it never
+        fabricates companies, projects or skills.
+        """
+        sections = draft.sections or {}
+        basic = sections.get("basic") or {}
+        lines: list[str] = []
+
+        name = str(basic.get("name") or "").strip() or draft.title or "我的简历"
+        lines.append(f"# {name}")
+        lines.append("")
+
+        meta = []
+        if basic.get("target_role"):
+            meta.append(f"目标岗位：{basic['target_role']}")
+        if basic.get("years"):
+            meta.append(f"工作年限：{basic['years']}")
+        if basic.get("city"):
+            meta.append(f"所在城市：{basic['city']}")
+        if meta:
+            lines.append(" ｜ ".join(meta))
+            lines.append("")
+
+        education = [item for item in (sections.get("education") or []) if isinstance(item, dict)]
+        if education:
+            lines.append("## 教育背景")
+            for item in education:
+                head = "，".join(
+                    part for part in (item.get("school"), item.get("major"), item.get("degree")) if part
+                )
+                period = item.get("period")
+                lines.append(f"- {head}" + (f"（{period}）" if period else ""))
+            lines.append("")
+
+        work = [item for item in (sections.get("work") or []) if isinstance(item, dict)]
+        if work:
+            lines.append("## 工作经历")
+            for item in work:
+                head = " · ".join(part for part in (item.get("company"), item.get("role")) if part)
+                period = item.get("period")
+                lines.append(f"### {head}" + (f"（{period}）" if period else ""))
+                for highlight in item.get("highlights") or []:
+                    lines.append(f"- {highlight}")
+            lines.append("")
+
+        projects = [item for item in (sections.get("projects") or []) if isinstance(item, dict)]
+        if projects:
+            lines.append("## 项目经历")
+            for item in projects:
+                lines.append(f"### {item.get('name') or '项目'}")
+                for label, field in (
+                    ("背景", "background"),
+                    ("职责", "role"),
+                    ("技术栈", "stack"),
+                    ("难点", "challenge"),
+                    ("成果", "result"),
+                ):
+                    if item.get(field):
+                        lines.append(f"- {label}：{item[field]}")
+            lines.append("")
+
+        skills = [str(skill).strip() for skill in (sections.get("skills") or []) if str(skill).strip()]
+        if skills:
+            lines.append("## 技能栈")
+            lines.append("- " + "、".join(skills))
+            lines.append("")
+
+        intent = sections.get("intent") or {}
+        intent_parts = []
+        if intent.get("position"):
+            intent_parts.append(f"目标岗位：{intent['position']}")
+        if intent.get("city"):
+            intent_parts.append(f"期望城市：{intent['city']}")
+        if intent.get("notes"):
+            intent_parts.append(f"其他：{intent['notes']}")
+        if intent_parts:
+            lines.append("## 求职意向")
+            lines.extend(f"- {part}" for part in intent_parts)
+            lines.append("")
+
+        return "\n".join(lines).strip()
+
+    # ------------------------------------------------------------------ 辅助
+
+    def _to_finalize_response(
+        self,
+        draft: ResumeDraft,
+        profile: ResumeProfileResponse,
+    ) -> FinalizeResponse:
+        return FinalizeResponse(
+            draft_id=draft.session_id,
+            profile_id=profile.id,
+            title=profile.title,
+            content=profile.content,
+            summary=profile.summary,
+        )
+
+    @staticmethod
+    def _build_message(role: str, content: str, stage: str) -> dict:
+        return {
+            "role": role,
+            "content": content,
+            "stage": stage,
+            "create_time": datetime.now(UTC).isoformat(),
+        }

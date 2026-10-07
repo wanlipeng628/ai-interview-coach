@@ -7,6 +7,7 @@ from app.infrastructure.db.models.interview_model import (
 )
 from app.infrastructure.db.models.position_model import PositionModel
 from app.infrastructure.db.models.report_model import InterviewReportModel
+from app.infrastructure.db.models.resume_draft_model import ResumeDraftModel
 from app.infrastructure.db.models.resume_model import ResumeProfileModel
 from app.infrastructure.db.models.training_model import (
     TrainingMessageModel,
@@ -21,6 +22,7 @@ __all__ = [
     "InterviewReportModel",
     "InterviewSessionModel",
     "PositionModel",
+    "ResumeDraftModel",
     "ResumeProfileModel",
     "TrainingMessageModel",
     "TrainingSessionModel",
