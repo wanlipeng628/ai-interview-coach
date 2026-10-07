@@ -343,6 +343,66 @@ class TestGuidanceBehaviour:
         assert detail["stage"] == "DONE"
 
 
+class TestFinalizeIntentDetection:
+    """结束指令必须整句匹配：叙述句里的「就这样 / 差不多了」不能误判，否则整段经历会丢失。"""
+
+    NARRATIVE_ANSWERS = (
+        "我负责测试这块，就这样一直做到了去年。",
+        "这个项目差不多了就上线了，后面又迭代了两版。",
+        "我在上一家公司负责用户增长，就这样做了两年，把日活从 1 万提到了 5 万。",
+        "我在上一家公司负责生成简历相关的功能模块",
+    )
+    FINALIZE_ANSWERS = (
+        "帮我生成吧",
+        "可以生成",
+        "就这样",
+        "差不多了",
+        "够了",
+        "不用问了",
+        "结束吧",
+        "帮我写",
+        "差不多了，帮我生成吧",
+        "够了，帮我生成吧",
+    )
+
+    def _service(self) -> ResumeAssistantService:
+        return ResumeAssistantService(FakeDraftRepository(), FakeResumeRepository())
+
+    def test_narrative_answers_are_not_finalize_intent(self) -> None:
+        service = self._service()
+        for answer in self.NARRATIVE_ANSWERS:
+            assert service._is_finalize_intent(answer) is False, answer
+
+    def test_explicit_finalize_phrases_are_detected(self) -> None:
+        service = self._service()
+        for answer in self.FINALIZE_ANSWERS:
+            assert service._is_finalize_intent(answer) is True, answer
+
+    def test_narrative_with_stopword_is_kept_as_normal_answer(self) -> None:
+        # 含「就这样」的正常回答必须走常规路径抽取进 sections，不能被当成结束指令丢弃
+        narrative = "我负责测试这块，就这样一直做到了去年。"
+        agent = StubResumeAgent(
+            steps=[
+                {
+                    "merge": {"basic": {"name": "张三"}},
+                    "section_complete": True,
+                    "next_section_question": "",
+                }
+            ]
+        )
+        with make_client(agent) as (client, _):
+            draft_id = _start(client)["draft_id"]
+            body = _answer(client, draft_id, narrative)
+            detail = client.get(f"/api/resume/assistant/{draft_id}").json()
+
+        assert body["status"] == "IN_PROGRESS"
+        assert body["ready_to_finalize"] is False
+        assert detail["sections"]["basic"]["name"] == "张三"
+        assert any(
+            item["role"] == "user" and item["content"] == narrative for item in detail["messages"]
+        )
+
+
 class TestFinalize:
     def test_finalize_always_regenerates(self) -> None:
         # 方案 A：finalize 不再幂等返回旧简历，每次都重新生成并覆盖同一份 profile

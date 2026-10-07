@@ -37,7 +37,13 @@ Open:
   草稿为 `COMPLETED` 时仍可继续提交，回答会作为补充并入对应分节，不会重新推进分节
 - `POST /api/resume/assistant/{draft_id}/finalize`：生成 Markdown 简历并写入 `resume_profiles`（可迭代：
   每次都重新生成并覆盖当前用户的默认简历，`profile_id` 保持不变）
-- `GET /api/resume/assistant/{draft_id}`：查询草稿状态（刷新 / 续聊）
+- `GET /api/resume/assistant/{draft_id}`：查询草稿状态（刷新 / 续聊），同样返回 `ready_to_finalize`
+
+结束指令按整句匹配（去标点后整句由「帮我生成吧 / 差不多了 / 就这样」等短语构成），
+叙述句里的「就这样」「差不多了」不会被误判为结束。
+
+提示：`answer` / `finalize` 在 LLM 调用失败时内部走确定性兜底（不返回 502），
+`start` 不调用 LLM；服务端不会因 LLM 抖动返回 5xx。
 
 错误提示统一为中文文案：草稿不存在返回 404，回答为空返回 400，不会把内部英文信息透给前端。
 

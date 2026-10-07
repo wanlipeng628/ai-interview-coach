@@ -73,19 +73,41 @@ LIST_SECTION_FIELDS: dict[str, tuple[str, list[str]]] = {
     "projects": ("name", ["name", "background", "role", "stack", "challenge", "result"]),
 }
 
-# 用户主动结束引导的触发词
-FINALIZE_KEYWORDS: tuple[str, ...] = (
+# 用户主动结束引导的表达。判定为整句匹配：规范化后的整句必须能由这些短语（加语气词）
+# 全部消耗掉才算结束指令，避免叙述句里出现「就这样 / 差不多了」被误判为结束而丢数据。
+# 长短语排在前面，便于拼接短语（如「差不多了，帮我生成吧」）被完整拆分。
+FINALIZE_PHRASES: tuple[str, ...] = (
+    "帮我生成一份简历",
+    "帮我生成简历",
+    "帮我生成吧",
     "帮我生成",
+    "帮忙生成",
+    "生成一份简历",
+    "生成简历",
     "生成吧",
     "直接生成",
     "可以生成",
-    "够了",
+    "帮我写一份简历",
+    "帮我写简历",
+    "帮我写吧",
+    "帮我写",
+    "就这样吧",
     "就这样",
     "差不多了",
     "不用问了",
     "结束吧",
-    "帮我写",
+    "可以了",
+    "够了",
 )
+
+# 规范化后超过该长度的回答一律按叙述处理，不再判定为结束指令
+FINALIZE_MAX_LENGTH = 12
+
+# 结束短语拼接后允许残留的语气词
+FINALIZE_FILLER = frozenset("吧了呢呀啊嘛哦嗯好行")
+
+# 整句意图匹配前统一去掉空白与中英文标点，避免标点影响判断
+ANSWER_NOISE_PATTERN = re.compile(r"[\s，。！？、,.!?;；:：'\"“”‘’]")
 
 # 用户明确表示该节没有内容的触发词
 SKIP_EXACT: frozenset[str] = frozenset(
@@ -400,12 +422,30 @@ class ResumeAssistantService:
 
     # ----------------------------------------------------------- 回答意图识别
 
+    @staticmethod
+    def _normalize_answer(answer: str) -> str:
+        """去空白与中英文标点并转小写，用于整句意图匹配。"""
+        return ANSWER_NOISE_PATTERN.sub("", answer.lower())
+
     def _is_finalize_intent(self, answer: str) -> bool:
-        text = answer.strip()
-        return any(keyword in text for keyword in FINALIZE_KEYWORDS)
+        """整句判定用户是否要求结束引导。
+
+        只有整句都由结束短语（可带语气词）构成才算，例如「帮我生成吧」
+        「差不多了，帮我生成吧」；叙述句里的「就这样」「差不多了」不会被误判。
+        """
+        text = self._normalize_answer(answer)
+        if not text or len(text) > FINALIZE_MAX_LENGTH:
+            return False
+        remainder = text
+        matched = False
+        for phrase in FINALIZE_PHRASES:
+            if phrase in remainder:
+                remainder = remainder.replace(phrase, "")
+                matched = True
+        return matched and all(char in FINALIZE_FILLER for char in remainder)
 
     def _is_skip_answer(self, answer: str) -> bool:
-        text = re.sub(r"[\s，。！？、,.!?;；:：'\"“”‘’]", "", answer.lower())
+        text = self._normalize_answer(answer)
         if not text:
             return True
         if text in SKIP_EXACT:
