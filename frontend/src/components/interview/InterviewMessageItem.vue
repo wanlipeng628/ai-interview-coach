@@ -31,8 +31,8 @@ defineProps<{
     flex-direction: row-reverse;
 
     .bubble {
-      color: #fff;
-      background: #2f6bff;
+      color: var(--c-text-inverse);
+      background: var(--c-primary-500);
     }
 
     .bubble__meta {
@@ -44,16 +44,16 @@ defineProps<{
 .bubble {
   max-width: min(680px, 78%);
   padding: 14px 16px;
-  border-radius: 8px;
-  color: #101828;
-  background: #fff;
-  box-shadow: 0 10px 24px rgba(19, 34, 66, 0.06);
+  border-radius: var(--r-md);
+  color: var(--c-text-primary);
+  background: var(--c-bg-card);
+  box-shadow: var(--sh-sm);
 
   &__meta {
     display: flex;
     gap: 10px;
     margin-bottom: 8px;
-    color: #667085;
+    color: var(--c-text-tertiary);
     font-size: 12px;
   }
 

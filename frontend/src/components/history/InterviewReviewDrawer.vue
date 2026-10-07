@@ -117,17 +117,17 @@ const getLevelText = (level: string) => {
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  border-radius: 8px;
-  background: #f5f8ff;
+  border-radius: var(--r-md);
+  background: var(--c-primary-50);
 
   p {
     margin: 0 0 6px;
-    color: #667085;
+    color: var(--c-text-tertiary);
   }
 
   h2 {
     margin: 0;
-    font-size: 20px;
+    font-size: var(--fs-2xl);
   }
 }
 
@@ -149,18 +149,19 @@ const getLevelText = (level: string) => {
   h3 {
     margin: 0 0 8px;
     font-size: 15px;
+    color: var(--c-text-primary);
   }
 
   p {
     margin: 0;
-    color: #344054;
+    color: var(--c-text-secondary);
     line-height: 1.8;
   }
 
   ul {
     margin: 0;
     padding-left: 18px;
-    color: #344054;
+    color: var(--c-text-secondary);
     line-height: 1.8;
   }
 }
@@ -168,8 +169,8 @@ const getLevelText = (level: string) => {
 .evaluation,
 .sample {
   padding: 12px;
-  border-radius: 8px;
-  background: #fff7ed;
+  border-radius: var(--r-md);
+  background: var(--c-warning-light);
 }
 
 // 抽屉近全宽后，summary 的两栏并排会把岗位名和按钮挤在一行；改为上下排布

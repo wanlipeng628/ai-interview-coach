@@ -59,9 +59,9 @@ const handleSend = () => {
   display: grid;
   gap: 12px;
   padding: 16px;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 12px 30px rgba(19, 34, 66, 0.06);
+  border-radius: var(--r-md);
+  background: var(--c-bg-card);
+  box-shadow: var(--sh-md);
 }
 
 .actions {
@@ -73,7 +73,7 @@ const handleSend = () => {
 
 .status-text {
   margin-right: auto;
-  color: #667085;
+  color: var(--c-text-tertiary);
   font-size: 13px;
 }
 

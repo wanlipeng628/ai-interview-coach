@@ -1,4 +1,8 @@
+@use './tokens' as *;
 @use './responsive' as *;
+@use './theme';
+@use './cards';
+@use './headers';
 
 * {
   box-sizing: border-box;
@@ -13,14 +17,18 @@ body,
 }
 
 body {
-  color: #101828;
-  background: #f5f7fb;
+  color: var(--c-text-primary);
+  background: var(--c-bg-page);
   font-family:
     Inter,
     "PingFang SC",
     "Microsoft YaHei",
     Arial,
     sans-serif;
+  font-size: var(--fs-base);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 button,
@@ -29,9 +37,14 @@ textarea {
   font: inherit;
 }
 
+h1, h2, h3, h4, h5, h6 {
+  color: var(--c-text-primary);
+}
+
+// EP 卡片 header/body 统一内距
 .el-card__header {
   padding: 18px 20px;
-  border-bottom: 1px solid #eef2f7;
+  border-bottom: 1px solid var(--c-border-light);
 }
 
 .el-card__body {

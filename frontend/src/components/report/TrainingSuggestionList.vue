@@ -1,9 +1,9 @@
 <template>
-  <el-card shadow="never" class="suggestion-card">
+  <el-card shadow="never" class="suggestion-card card card--float">
     <template #header><h2>推荐训练方向</h2></template>
     <div class="suggestions">
       <div v-for="item in suggestions" :key="item.title" class="suggestion">
-        <el-tag :type="item.priority === '高' ? 'danger' : 'warning'">
+        <el-tag :type="item.priority === '高' ? 'danger' : 'warning'" effect="light">
           {{ item.priority }}优先级
         </el-tag>
         <div>
@@ -25,13 +25,11 @@ defineProps<{ suggestions: TrainingSuggestion[] }>()
 @use '../../assets/styles/responsive' as *;
 
 .suggestion-card {
-  border: 0;
-  border-radius: 8px;
-}
-
-h2 {
-  margin: 0;
-  font-size: 17px;
+  h2 {
+    margin: 0;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+  }
 }
 
 .suggestions {
@@ -45,16 +43,21 @@ h2 {
   gap: 12px;
   align-items: start;
   padding-bottom: 14px;
-  border-bottom: 1px solid #eef2f7;
+  border-bottom: 1px solid var(--c-border-light);
 
   &:last-child {
     border-bottom: 0;
     padding-bottom: 0;
   }
 
+  strong {
+    color: var(--c-text-primary);
+    font-weight: 600;
+  }
+
   p {
     margin: 6px 0 0;
-    color: #667085;
+    color: var(--c-text-tertiary);
     line-height: 1.6;
   }
 }

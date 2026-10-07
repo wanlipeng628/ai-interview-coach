@@ -1,12 +1,12 @@
 <template>
-  <el-card shadow="never" class="evidence-card">
+  <el-card shadow="never" class="evidence-card card card--float">
     <template #header><h2>关键问答证据</h2></template>
     <el-empty v-if="evidences.length === 0" description="暂无关键问答证据" />
     <div v-else class="evidences">
       <article v-for="item in evidences" :key="item.title" class="evidence">
         <div class="evidence__header">
           <strong>{{ item.title }}</strong>
-          <el-tag :type="getImpactType(item.impact)">
+          <el-tag :type="getImpactType(item.impact)" effect="light">
             {{ getImpactText(item.impact) }}
           </el-tag>
         </div>
@@ -52,13 +52,11 @@ const getImpactText = (impact: string) => {
 @use '../../assets/styles/responsive' as *;
 
 .evidence-card {
-  border: 0;
-  border-radius: 8px;
-}
-
-h2 {
-  margin: 0;
-  font-size: 17px;
+  h2 {
+    margin: 0;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+  }
 }
 
 .evidences {
@@ -68,21 +66,26 @@ h2 {
 
 .evidence {
   padding: 14px;
-  border: 1px solid #eef2f7;
-  border-radius: 8px;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg-card);
 
   &__header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+
+    strong {
+      color: var(--c-text-primary);
+      font-weight: 600;
+    }
   }
 }
 
 .weakness {
   margin: 8px 0 14px;
-  color: #667085;
+  color: var(--c-text-tertiary);
 }
 
 section {
@@ -91,11 +94,13 @@ section {
   h3 {
     margin: 0 0 6px;
     font-size: 14px;
+    font-weight: 600;
+    color: var(--c-text-secondary);
   }
 
   p {
     margin: 0;
-    color: #344054;
+    color: var(--c-text-secondary);
     line-height: 1.7;
   }
 }

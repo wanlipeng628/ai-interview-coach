@@ -39,8 +39,8 @@ watch(
   gap: 18px;
   overflow-y: auto;
   padding: 20px;
-  border-radius: 8px;
-  background: #eef3fb;
+  border-radius: var(--r-md);
+  background: var(--c-bg-tint);
 }
 
 @include mobile {

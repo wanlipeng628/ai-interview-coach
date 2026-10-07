@@ -7,6 +7,7 @@ import type { EChartsOption } from 'echarts'
 import { computed } from 'vue'
 
 import BaseChart from './BaseChart.vue'
+import { tokens } from '@/assets/styles/tokens'
 import type { TrendPoint } from '@/types/dashboard'
 
 const props = defineProps<{
@@ -20,14 +21,16 @@ const option = computed<EChartsOption>(() => ({
     type: 'category',
     boundaryGap: false,
     data: props.data.map((item) => item.date),
-    axisLine: { lineStyle: { color: '#d7ddea' } },
+    axisLine: { lineStyle: { color: tokens.color.border.base } },
     axisTick: { show: false },
+    axisLabel: { color: tokens.color.text.tertiary },
   },
   yAxis: {
     type: 'value',
     min: 40,
     max: 100,
-    splitLine: { lineStyle: { color: '#edf0f6' } },
+    splitLine: { lineStyle: { color: tokens.color.border.light } },
+    axisLabel: { color: tokens.color.text.tertiary },
   },
   series: [
     {
@@ -36,9 +39,9 @@ const option = computed<EChartsOption>(() => ({
       smooth: true,
       symbolSize: 8,
       data: props.data.map((item) => item.score),
-      lineStyle: { width: 3, color: '#2f6bff' },
-      itemStyle: { color: '#2f6bff' },
-      areaStyle: { color: 'rgba(47, 107, 255, 0.12)' },
+      lineStyle: { width: 3, color: tokens.color.primary[500] },
+      itemStyle: { color: tokens.color.primary[500] },
+      areaStyle: { color: tokens.color.primary[50] + 'cc' },
     },
   ],
 }))

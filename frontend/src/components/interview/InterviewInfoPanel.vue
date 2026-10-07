@@ -1,7 +1,7 @@
 <template>
   <el-card
     shadow="never"
-    class="info-panel"
+    class="info-panel card card--float"
     :class="{ 'info-panel--collapsed': isMobile && !expanded }"
   >
     <template #header>
@@ -22,15 +22,15 @@
 
     <div v-show="!isMobile || expanded" class="info-list">
       <div>
-        <span>当前岗位</span>
+        <span class="info-list__label">当前岗位</span>
         <strong>{{ info.jobRole }}</strong>
       </div>
       <div>
-        <span>面试时长</span>
+        <span class="info-list__label">面试时长</span>
         <strong>{{ formattedDuration }} / {{ info.durationLimitMinutes }} 分钟</strong>
       </div>
       <div>
-        <span>面试状态</span>
+        <span class="info-list__label">面试状态</span>
         <el-tag :type="info.status === 'finished' ? 'success' : 'primary'">
           {{ info.status === 'finished' ? '已结束' : '进行中' }}
         </el-tag>
@@ -63,14 +63,10 @@ const formattedDuration = computed(() => {
 <style scoped lang="scss">
 @use '../../assets/styles/responsive' as *;
 
-.info-panel {
-  border: 0;
-  border-radius: 8px;
-}
-
-h2 {
-  margin: 0;
-  font-size: 17px;
+.info-panel.card {
+  h2 {
+    margin: 0;
+  }
 }
 
 .info-list {
@@ -82,14 +78,15 @@ h2 {
     gap: 6px;
   }
 
-  span {
-    color: #667085;
+  // 标签文字：用类名而非裸 span，避免命中同容器内 el-tag 的根 span
+  &__label {
+    color: var(--c-text-tertiary);
     font-size: 13px;
   }
 
   strong {
-    color: #101828;
-    font-size: 18px;
+    color: var(--c-text-primary);
+    font-size: var(--fs-xl);
   }
 }
 

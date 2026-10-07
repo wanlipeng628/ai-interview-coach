@@ -26,7 +26,7 @@
           :title="isIconRail ? item.label : undefined"
           @click="router.push(item.path)"
         >
-          <el-icon><House /></el-icon>
+          <el-icon><component :is="item.icon" /></el-icon>
           <span>{{ item.label }}</span>
         </div>
       </nav>
@@ -99,6 +99,7 @@ import {
   MoreFilled,
   TrendCharts,
   User,
+  Notebook,
 } from '@element-plus/icons-vue'
 import { computed, ref } from 'vue'
 import type { Component } from 'vue'
@@ -110,6 +111,7 @@ type MenuItem = {
   label: string
   path: string
   activePath?: string
+  icon: Component
 }
 
 const route = useRoute()
@@ -122,12 +124,12 @@ const isIconRail = useMediaQuery('(min-width: 769px) and (max-width: 1023px)')
 
 // 侧栏菜单保持改造前的 6 项，桌面端渲染结果不变
 const menus: MenuItem[] = [
-  { label: '首页概览', path: '/dashboard' },
-  { label: 'AI 模拟面试', path: '/mock-interview', activePath: '/mock-interview' },
-  { label: '面试报告', path: '/report', activePath: '/report' },
-  { label: '能力画像', path: '/ability-profile' },
-  { label: '专项训练', path: '/training' },
-  { label: '面试历史', path: '/interview-history' },
+  { label: '首页概览', path: '/dashboard', icon: House },
+  { label: 'AI 模拟面试', path: '/mock-interview', activePath: '/mock-interview', icon: ChatDotRound },
+  { label: '面试报告', path: '/report', activePath: '/report', icon: Document },
+  { label: '能力画像', path: '/ability-profile', icon: DataAnalysis },
+  { label: '专项训练', path: '/training', icon: Notebook },
+  { label: '面试历史', path: '/interview-history', icon: Clock },
 ]
 
 // 底部 TabBar 的 4 个页面入口，第 5 格固定为「更多」
@@ -159,12 +161,13 @@ const handleDrawerSelect = (path: string) => {
 
 <style scoped lang="scss">
 @use '../assets/styles/responsive' as *;
+@use '../assets/styles/tokens' as *;
 
 .app-layout {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 232px 1fr;
-  background: #f5f7fb;
+  background: var(--c-bg-page);
 }
 
 .sidebar {
@@ -174,8 +177,8 @@ const handleDrawerSelect = (path: string) => {
   display: flex;
   flex-direction: column;
   padding: 22px 18px;
-  color: #e9eefc;
-  background: #0e1629;
+  color: var(--c-dark-text);
+  background: var(--c-dark-bg);
 }
 
 .brand {
@@ -189,15 +192,15 @@ const handleDrawerSelect = (path: string) => {
     height: 38px;
     display: grid;
     place-items: center;
-    border-radius: 8px;
-    font-weight: 800;
-    background: #2f6bff;
+    border-radius: var(--r-md);
+    font-weight: var(--fw-bold);
+    background: var(--c-primary-500);
   }
 
   span {
     display: block;
     margin-top: 4px;
-    color: #8d98b4;
+    color: var(--c-dark-text-mute);
     font-size: 12px;
   }
 }
@@ -212,14 +215,14 @@ const handleDrawerSelect = (path: string) => {
     gap: 10px;
     height: 44px;
     padding: 0 12px;
-    border-radius: 8px;
-    color: #b8c2dd;
+    border-radius: var(--r-md);
+    color: var(--c-dark-text-sec);
     cursor: pointer;
   }
 
   &__item--active {
-    color: #fff;
-    background: #2f6bff;
+    color: var(--c-text-inverse);
+    background: var(--c-primary-500);
   }
 }
 
@@ -229,13 +232,13 @@ const handleDrawerSelect = (path: string) => {
   align-items: center;
   gap: 10px;
   padding: 14px;
-  border: 1px solid #263451;
-  border-radius: 8px;
+  border: 1px solid var(--c-dark-border);
+  border-radius: var(--r-md);
 
   span {
     display: block;
     margin-top: 4px;
-    color: #95a0ba;
+    color: var(--c-dark-text-mute);
     font-size: 12px;
   }
 }
@@ -296,8 +299,8 @@ const handleDrawerSelect = (path: string) => {
     gap: 12px;
     min-height: $topbar-height;
     padding: 0 14px;
-    color: #e9eefc;
-    background: #0e1629;
+    color: var(--c-dark-text);
+    background: var(--c-dark-bg);
   }
 
   .topbar__brand {
@@ -326,8 +329,8 @@ const handleDrawerSelect = (path: string) => {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     padding-bottom: $safe-bottom;
-    background: #fff;
-    border-top: 1px solid #eef2f7;
+    background: var(--c-bg-card);
+    border-top: 1px solid var(--c-border);
   }
 
   .tabbar__item {
@@ -337,12 +340,12 @@ const handleDrawerSelect = (path: string) => {
     gap: 3px;
     min-height: $tabbar-height;
     padding: 4px 2px;
-    color: #667085;
+    color: var(--c-text-tertiary);
     font-size: 11px;
     cursor: pointer;
 
     &--active {
-      color: #2f6bff;
+      color: var(--c-primary-500);
     }
   }
 
@@ -356,14 +359,14 @@ const handleDrawerSelect = (path: string) => {
       gap: 10px;
       min-height: 48px;
       padding: 0 14px;
-      border-radius: 8px;
-      color: #344054;
+      border-radius: var(--r-md);
+      color: var(--c-text-secondary);
       cursor: pointer;
     }
 
     &__item--active {
-      color: #2f6bff;
-      background: #eef3fb;
+      color: var(--c-primary-500);
+      background: var(--c-primary-50);
     }
   }
 }

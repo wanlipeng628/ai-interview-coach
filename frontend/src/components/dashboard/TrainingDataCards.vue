@@ -1,6 +1,11 @@
 <template>
   <section class="metric-grid">
-    <article v-for="metric in metrics" :key="metric.label" class="metric-card" :class="`is-${metric.tone}`">
+    <article
+      v-for="metric in metrics"
+      :key="metric.label"
+      class="metric-card card card--float"
+      :class="`is-${metric.tone}`"
+    >
       <span>{{ metric.label }}</span>
       <strong>{{ metric.value }}</strong>
       <small>{{ metric.trend }}</small>
@@ -30,29 +35,27 @@ defineProps<{
   gap: 8px;
   min-height: 112px;
   padding: 18px;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 12px 30px rgba(19, 34, 66, 0.05);
 
   span {
-    color: #667085;
+    color: var(--c-text-tertiary);
     font-size: 14px;
   }
 
   strong {
-    color: #101828;
+    color: var(--c-text-primary);
     font-size: 28px;
+    font-weight: 700;
   }
 
   small {
-    font-weight: 700;
+    font-weight: 600;
   }
 }
 
-.is-blue small { color: #2f6bff; }
-.is-green small { color: #17a568; }
-.is-orange small { color: #e26a2c; }
-.is-purple small { color: #7a5af8; }
+.is-blue small   { color: var(--c-primary-500); }
+.is-green small  { color: var(--c-success-text); }
+.is-orange small { color: var(--c-warning-text); }
+.is-purple small { color: var(--c-chart-purple); }
 
 @media (max-width: 980px) {
   .metric-grid {

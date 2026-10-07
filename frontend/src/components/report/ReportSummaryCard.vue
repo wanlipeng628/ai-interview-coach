@@ -1,9 +1,9 @@
 <template>
-  <el-card shadow="never" class="summary-card">
+  <el-card shadow="never" class="summary-card card card--float is-emphasis">
     <div class="score-line">
       <strong class="score">{{ summary.overallScore }}</strong>
-      <span>/ 100</span>
-      <el-tag type="warning">{{ summary.level }}</el-tag>
+      <span class="score-unit">/ 100</span>
+      <el-tag type="warning" effect="light">{{ summary.level }}</el-tag>
     </div>
     <p>超过了 {{ summary.percentile }}% 的求职者</p>
     <strong class="conclusion">{{ summary.conclusion }}</strong>
@@ -20,8 +20,10 @@ defineProps<{ summary: ReportSummary }>()
 @use '../../assets/styles/responsive' as *;
 
 .summary-card {
-  border: 0;
-  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
 }
 
 .score-line {
@@ -32,15 +34,17 @@ defineProps<{ summary: ReportSummary }>()
 }
 
 .score {
-  color: #e26a2c;
+  color: var(--c-danger-text);
   font-size: 64px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
 }
 
-span,
+// 只给「/ 100」与说明段上色；不要用裸 span 选择器，
+// 否则会命中同容器内 el-tag 的根 span，把标签文字色顶掉。
+.score-unit,
 p {
-  color: #667085;
+  color: var(--c-text-tertiary);
 }
 
 p {
@@ -50,6 +54,8 @@ p {
 
 .conclusion {
   display: block;
+  color: var(--c-text-primary);
+  font-weight: 600;
   line-height: 1.7;
 }
 

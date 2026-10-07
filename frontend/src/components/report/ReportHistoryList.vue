@@ -2,13 +2,13 @@
   <el-card
     v-if="!isMobile || reports.length > 0"
     shadow="never"
-    class="history-card"
+    class="history-card card card--float"
     :class="{ 'history-card--collapsed': isMobile && !expanded }"
   >
     <template #header>
       <div class="header">
         <h2>历史报告</h2>
-        <el-tag>{{ reports.length }} 份</el-tag>
+        <el-tag effect="light">{{ reports.length }} 份</el-tag>
         <!-- 折叠入口只在窄屏渲染，桌面端 #header 内仍只有 h2 + 计数标签，保持像素级一致 -->
         <el-button
           v-if="isMobile"
@@ -86,8 +86,7 @@ const formatTime = (value: string) => {
 @use '../../assets/styles/responsive' as *;
 
 .history-card {
-  border: 0;
-  border-radius: 8px;
+  height: 100%;
 }
 
 .header {
@@ -98,7 +97,8 @@ const formatTime = (value: string) => {
 
 h2 {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
 }
 
 .report-item {
@@ -108,9 +108,9 @@ h2 {
   gap: 6px;
   padding: 14px 48px 14px 14px;
   margin-bottom: 10px;
-  border: 1px solid #edf1f7;
-  border-radius: 8px;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg-card);
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -121,18 +121,19 @@ h2 {
 
   &:hover,
   &.active {
-    border-color: #2f6bff;
-    background: #f5f8ff;
+    border-color: var(--c-primary-500);
+    background: var(--c-primary-50);
     box-shadow: 0 8px 22px rgba(47, 107, 255, 0.08);
   }
 }
 
 .role {
-  font-weight: 700;
+  font-weight: 600;
+  color: var(--c-text-primary);
 }
 
 .time {
-  color: #667085;
+  color: var(--c-text-tertiary);
   font-size: 13px;
 }
 
@@ -140,13 +141,13 @@ h2 {
   position: absolute;
   top: 14px;
   right: 14px;
-  color: #e26a2c;
-  font-weight: 800;
+  color: var(--c-danger-text);
+  font-weight: 700;
 }
 
 // 与 script 里的 useMediaQuery 同源：折叠跟随单列断点、被 $desktop-min 截断到 $desktop-min - 1px。
 // JS 与 SCSS 是两个真值源，改一处必须同步另一处，否则会出现"CSS 折叠了但 JS 没折叠"。
-@media (max-width: #{$desktop-min - 1px}) {
+@media (max-width: 1023px) {
   // 职位名保留了右侧 48px 给绝对定位的分数，长职位名兜住不溢出
   .role {
     overflow-wrap: anywhere;

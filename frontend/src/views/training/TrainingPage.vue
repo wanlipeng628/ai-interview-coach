@@ -1,14 +1,12 @@
 <template>
   <div class="page">
-    <header class="page-header">
-      <div>
-        <p>专项训练</p>
-        <h1>针对薄弱点的训练清单</h1>
-      </div>
-      <el-button :loading="training.loading" type="primary" @click="training.fetchTasks()">
-        刷新任务
-      </el-button>
-    </header>
+    <PageHeader eyebrow="专项训练" title="针对薄弱点的训练清单">
+      <template #actions>
+        <el-button :loading="training.loading" type="primary" @click="training.fetchTasks()">
+          刷新任务
+        </el-button>
+      </template>
+    </PageHeader>
 
     <el-alert
       v-if="training.errorMessage"
@@ -34,6 +32,7 @@ import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
+import PageHeader from '@/components/common/PageHeader.vue'
 import TrainingPlanCard from '@/components/training/TrainingPlanCard.vue'
 import TrainingTopicList from '@/components/training/TrainingTopicList.vue'
 import { useTrainingStore } from '@/stores/training.store'
@@ -69,45 +68,10 @@ onMounted(() => {
   padding: 24px;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 24px;
-  border-radius: 8px;
-  background: #fff;
-
-  p {
-    margin: 0 0 8px;
-    color: #2f6bff;
-    font-weight: 800;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 24px;
-  }
-}
-
 @include mobile {
   .page {
     gap: 12px;
     padding: 14px;
-  }
-
-  .page-header {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-    padding: 18px;
-
-    h1 {
-      font-size: 20px;
-    }
-
-    .el-button {
-      width: 100%;
-    }
   }
 }
 </style>

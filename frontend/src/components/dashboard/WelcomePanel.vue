@@ -1,13 +1,15 @@
 <template>
-  <section class="welcome-panel">
-    <div>
-      <p class="eyebrow">首页概览</p>
+  <section class="welcome-panel card card--float is-emphasis">
+    <div class="welcome-panel__content">
+      <p class="page-header__eyebrow">首页概览</p>
       <h1>晚上好，{{ userName }}</h1>
-      <p class="subtitle">坚持练习，离理想 Offer 更进一步！</p>
+      <p class="page-header__desc">这里汇总你的训练数据、能力变化与最近面试记录。</p>
     </div>
-    <el-button type="primary" size="large" @click="$emit('start')">
-      快捷开始面试
-    </el-button>
+    <div class="welcome-panel__actions">
+      <el-button type="primary" size="large" @click="$emit('start')">
+        快捷开始面试
+      </el-button>
+    </div>
   </section>
 </template>
 
@@ -29,27 +31,22 @@ defineEmits<{
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 24px 28px;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 12px 30px rgba(19, 34, 66, 0.05);
-}
+  padding: 28px;
 
-.eyebrow {
-  margin: 0 0 8px;
-  color: #2f6bff;
-  font-weight: 700;
-}
+  &__content {
+    min-width: 0;
 
-h1 {
-  margin: 0;
-  font-size: 26px;
-  color: #101828;
-}
+    h1 {
+      margin: 6px 0 0;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--c-text-primary);
+    }
+  }
 
-.subtitle {
-  margin: 8px 0 0;
-  color: #667085;
+  &__actions {
+    flex-shrink: 0;
+  }
 }
 
 @include mobile {
@@ -58,14 +55,10 @@ h1 {
     align-items: stretch;
     gap: 14px;
     padding: 18px;
-  }
 
-  h1 {
-    font-size: 21px;
-  }
-
-  .subtitle {
-    font-size: 13px;
+    h1 {
+      font-size: 21px;
+    }
   }
 }
 </style>
