@@ -35,7 +35,13 @@ Open:
 - `POST /api/resume/assistant/start`：开始引导，返回第一个问题（201）
 - `POST /api/resume/assistant/{draft_id}/answer`：提交回答，返回下一个问题或 `ready_to_finalize`
 - `POST /api/resume/assistant/{draft_id}/finalize`：生成 Markdown 简历并写入 `resume_profiles`（幂等）
-- `GET /api/resume/assistant/{draft_id}`：查询草稿状态（刷新 / 续聊）
+- `GET /api/resume/assistant/{draft_id}`：查询草稿状态（刷新 / 续聊），同样返回 `ready_to_finalize`
+
+结束指令按整句匹配（去标点后整句由「帮我生成吧 / 差不多了 / 就这样」等短语构成），
+叙述句里的「就这样」「差不多了」不会被误判为结束。
+
+提示：`answer` / `finalize` 在 LLM 调用失败时内部走确定性兜底（不返回 502），
+`start` 不调用 LLM；服务端不会因 LLM 抖动返回 5xx。
 
 QA 复现脚本：`bash scripts/qa_resume_assistant.sh`（需先启动后端，依赖 curl + python）。
 
