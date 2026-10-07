@@ -26,15 +26,6 @@ class ResumeRepository:
         model = self.db.execute(statement).scalar_one_or_none()
         return self._to_response(model) if model else None
 
-    def get_by_id(self, user_id: int, profile_id: int) -> ResumeProfileResponse | None:
-        model = self.db.execute(
-            select(ResumeProfileModel).where(
-                ResumeProfileModel.id == profile_id,
-                ResumeProfileModel.user_id == user_id,
-            )
-        ).scalar_one_or_none()
-        return self._to_response(model) if model else None
-
     def upsert_default(
         self,
         user_id: int,

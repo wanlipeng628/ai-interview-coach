@@ -1,5 +1,6 @@
+from typing import NoReturn
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from openai import OpenAIError
 
 from app.application.resume.resume_assistant_dto import (
     AnswerResponse,
@@ -10,6 +11,7 @@ from app.application.resume.resume_assistant_dto import (
     SubmitAnswerRequest,
 )
 from app.application.resume.resume_assistant_service import ResumeAssistantService
+from app.domain.resume.errors import ResumeAssistantError, ResumeDraftNotFoundError
 from app.infrastructure.repositories.resume_draft_repository import (
     ResumeDraftRepository,
     get_resume_draft_repository,
@@ -21,6 +23,12 @@ from app.infrastructure.repositories.resume_repository import (
 from app.shared.constants import DEFAULT_USER_ID
 
 router = APIRouter()
+
+# 领域异常 → HTTP 状态码；未登记的领域异常一律按 400 处理。
+# 异常自带中文文案，因此不会把内部英文提示透给用户。
+_ERROR_STATUS: dict[type[ResumeAssistantError], int] = {
+    ResumeDraftNotFoundError: status.HTTP_404_NOT_FOUND,
+}
 
 
 def get_current_user_id() -> int:
@@ -34,11 +42,9 @@ def get_resume_assistant_service(
     return ResumeAssistantService(draft_repository, resume_repository)
 
 
-def _raise_draft_error(exc: ValueError) -> None:
-    message = str(exc)
-    if "not found" in message.lower():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message) from exc
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
+def _raise_draft_error(exc: ResumeAssistantError) -> NoReturn:
+    code = _ERROR_STATUS.get(type(exc), status.HTTP_400_BAD_REQUEST)
+    raise HTTPException(status_code=code, detail=str(exc)) from exc
 
 
 @router.post("/start", response_model=StartDraftResponse, status_code=status.HTTP_201_CREATED)
@@ -61,14 +67,8 @@ async def submit_draft_answer(
     """Record the user's answer and return the next guidance question."""
     try:
         return service.submit_answer(user_id, draft_id, request)
-    except ValueError as exc:
+    except ResumeAssistantError as exc:
         _raise_draft_error(exc)
-    except (RuntimeError, OpenAIError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"LLM generation failed: {exc}",
-        ) from exc
-    raise RuntimeError("unreachable")
 
 
 @router.post("/{draft_id}/finalize", response_model=FinalizeResponse)
@@ -80,14 +80,8 @@ async def finalize_draft(
     """Generate the Markdown resume and persist it as the user's profile."""
     try:
         return service.finalize(user_id, draft_id)
-    except ValueError as exc:
+    except ResumeAssistantError as exc:
         _raise_draft_error(exc)
-    except (RuntimeError, OpenAIError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"LLM generation failed: {exc}",
-        ) from exc
-    raise RuntimeError("unreachable")
 
 
 @router.get("/{draft_id}", response_model=DraftDetailResponse)
@@ -99,6 +93,5 @@ async def get_draft(
     """Fetch the full draft state for refresh / resume conversation."""
     try:
         return service.get_draft(user_id, draft_id)
-    except ValueError as exc:
+    except ResumeAssistantError as exc:
         _raise_draft_error(exc)
-    raise RuntimeError("unreachable")

@@ -1,9 +1,9 @@
 """Tests for the conversational resume assistant endpoints."""
 
 import copy
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Iterator
 
 from fastapi.testclient import TestClient
 
@@ -39,12 +39,6 @@ class FakeResumeRepository:
         self._default_by_user: dict[int, int] = {}
         self._next_id = 1
 
-    def get_by_id(self, user_id: int, profile_id: int) -> ResumeProfileResponse | None:
-        profile = self._by_id.get(profile_id)
-        if profile is None:
-            return None
-        return profile
-
     def get_default(self, user_id: int) -> ResumeProfileResponse | None:
         profile_id = self._default_by_user.get(user_id)
         return self._by_id.get(profile_id) if profile_id else None
@@ -70,10 +64,18 @@ class FakeResumeRepository:
 class StubResumeAgent:
     """Scripted agent: pops one scripted step per generate_next_question call."""
 
-    def __init__(self, steps: list[dict] | None = None, resume_content: str | None = None) -> None:
+    def __init__(
+        self,
+        steps: list[dict] | None = None,
+        resume_content: str | None = None,
+        supplements: list[dict] | None = None,
+    ) -> None:
         self._steps = list(steps or [])
         self._resume_content = resume_content
+        self._supplements = list(supplements or [])
         self.calls = 0
+        self.resume_calls = 0
+        self.supplement_calls = 0
 
     def generate_next_question(self, **kwargs) -> dict:
         if self.calls < len(self._steps):
@@ -84,9 +86,18 @@ class StubResumeAgent:
         return {"merge": {}, "section_complete": True}
 
     def generate_resume(self, **kwargs) -> str:
+        self.resume_calls += 1
         if self._resume_content is None:
             raise RuntimeError("llm unavailable")
         return self._resume_content
+
+    def extract_supplement(self, **kwargs) -> dict:
+        if self.supplement_calls < len(self._supplements):
+            step = self._supplements[self.supplement_calls]
+            self.supplement_calls += 1
+            return step
+        self.supplement_calls += 1
+        return {"merge": {}}
 
 
 class FailingAgent:
@@ -96,6 +107,9 @@ class FailingAgent:
         raise RuntimeError("llm unavailable")
 
     def generate_resume(self, **kwargs) -> str:
+        raise RuntimeError("llm unavailable")
+
+    def extract_supplement(self, **kwargs) -> dict:
         raise RuntimeError("llm unavailable")
 
 
@@ -134,12 +148,38 @@ SIX_ANSWERS = [
 
 SIX_MERGES = [
     {"basic": {"name": "张三", "years": "5 年", "city": "北京"}},
-    {"education": {"school": "清华大学", "major": "计算机科学与技术", "degree": "本科", "period": "2015-2019"}},
-    {"work": {"company": "A 公司", "role": "后端工程师", "period": "2019-2023", "highlights": ["QPS 从 500 提升到 3000"]}},
-    {"projects": {"name": "推荐系统重构", "role": "召回模块负责人", "stack": "Python、Redis", "challenge": "冷启动", "result": "点击率提升 12%"}},
+    {
+        "education": {
+            "school": "清华大学",
+            "major": "计算机科学与技术",
+            "degree": "本科",
+            "period": "2015-2019",
+        }
+    },
+    {
+        "work": {
+            "company": "A 公司",
+            "role": "后端工程师",
+            "period": "2019-2023",
+            "highlights": ["QPS 从 500 提升到 3000"],
+        }
+    },
+    {
+        "projects": {
+            "name": "推荐系统重构",
+            "role": "召回模块负责人",
+            "stack": "Python、Redis",
+            "challenge": "冷启动",
+            "result": "点击率提升 12%",
+        }
+    },
     {"skills": ["Python", "Go", "Redis", "PostgreSQL"]},
     {"intent": {"position": "AI 应用开发工程师", "city": "上海"}},
 ]
+
+
+def _has_cjk(text: str) -> bool:
+    return any("一" <= char <= "鿿" for char in text)
 
 
 def _complete_steps() -> list[dict]:
@@ -279,30 +319,80 @@ class TestGuidanceBehaviour:
         assert body["stage"] == "DONE"
         assert rounds == 18
 
-    def test_answer_after_completion_returns_400(self) -> None:
+    def test_answer_after_completion_is_accepted_as_supplement(self) -> None:
+        # 方案 A：已完成草稿仍可继续接收回答（不再 400），且不推进分节
         with make_client(FailingAgent()) as (client, _):
             draft_id = _start(client)["draft_id"]
             _answer(client, draft_id, "帮我生成吧")
-            response = client.post(
-                f"/api/resume/assistant/{draft_id}/answer",
-                json={"answer": "补充一点"},
-            )
-        assert response.status_code == 400
+
+            body = _answer(client, draft_id, "补充一点")
+
+            assert body["status"] == "COMPLETED"
+            assert body["stage"] == "DONE"
+            assert body["question"] is None
+            assert body["ready_to_finalize"] is True
+            assert body["progress"] == {
+                "completed": ["BASIC", "EDUCATION", "WORK", "PROJECT", "SKILL", "INTENT"],
+                "current": "DONE",
+            }
+
+            detail = client.get(f"/api/resume/assistant/{draft_id}").json()
+
+        assert detail["messages"][-1]["role"] == "user"
+        assert detail["messages"][-1]["content"] == "补充一点"
+        assert detail["stage"] == "DONE"
 
 
 class TestFinalize:
-    def test_finalize_is_idempotent(self) -> None:
-        agent = StubResumeAgent(steps=_complete_steps())
+    def test_finalize_always_regenerates(self) -> None:
+        # 方案 A：finalize 不再幂等返回旧简历，每次都重新生成并覆盖同一份 profile
+        agent = StubResumeAgent(steps=_complete_steps(), resume_content="# 简历\n\n张三")
+        with make_client(agent) as (client, _):
+            draft_id = _start(client)["draft_id"]
+            for answer in SIX_ANSWERS:
+                _answer(client, draft_id, answer)
+
+            first = client.post(f"/api/resume/assistant/{draft_id}/finalize")
+            second = client.post(f"/api/resume/assistant/{draft_id}/finalize")
+
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+        # 覆盖同一份默认简历，因此 profile_id 不变，但每次都真的重新生成了内容
+        assert first.json()["profile_id"] == second.json()["profile_id"]
+        assert agent.resume_calls == 2
+
+    def test_supplement_then_regenerate_updates_resume(self) -> None:
+        # 走通前端「继续补充 → 重新生成」：补充内容要能进入重新生成的简历
+        agent = StubResumeAgent(
+            steps=_complete_steps(),
+            supplements=[{"merge": {"projects": {"name": "开源贡献", "result": "star 1k"}}}],
+        )
         with make_client(agent) as (client, _):
             draft_id = _start(client)["draft_id"]
             for answer in SIX_ANSWERS:
                 _answer(client, draft_id, answer)
 
             first = client.post(f"/api/resume/assistant/{draft_id}/finalize").json()
+            assert "开源贡献" not in first["content"]
+
+            _answer(client, draft_id, "再补充一个开源项目：给某某项目做了贡献，现在 star 1k")
             second = client.post(f"/api/resume/assistant/{draft_id}/finalize").json()
 
-        assert first["profile_id"] == second["profile_id"]
-        assert first["content"] == second["content"]
+        assert second["profile_id"] == first["profile_id"]
+        assert second["content"] != first["content"]
+        assert "开源贡献" in second["content"]
+
+    def test_supplement_without_llm_still_succeeds(self) -> None:
+        # LLM 不可用时补充回答也不能报错，只是抽不到结构化字段
+        with make_client(FailingAgent()) as (client, _):
+            draft_id = _start(client)["draft_id"]
+            _answer(client, draft_id, "帮我生成吧")
+            client.post(f"/api/resume/assistant/{draft_id}/finalize")
+            body = _answer(client, draft_id, "再补充一点内容")
+            again = client.post(f"/api/resume/assistant/{draft_id}/finalize")
+
+        assert body["ready_to_finalize"] is True
+        assert again.status_code == 200
 
     def test_fallback_resume_does_not_fabricate(self) -> None:
         # Agent 能抽取信息但生成简历时失败 → 走确定性兜底渲染，绝不编造内容
@@ -376,10 +466,17 @@ class TestAgentJsonRobustness:
 
 
 class TestErrorHandling:
-    def test_unknown_draft_returns_404(self) -> None:
+    def test_unknown_draft_returns_404_with_chinese_detail(self) -> None:
         with make_client(StubResumeAgent()) as (client, _):
             response = client.get("/api/resume/assistant/does-not-exist")
         assert response.status_code == 404
+        assert _has_cjk(response.json()["detail"])
+
+    def test_finalize_unknown_draft_returns_404_with_chinese_detail(self) -> None:
+        with make_client(StubResumeAgent()) as (client, _):
+            response = client.post("/api/resume/assistant/does-not-exist/finalize")
+        assert response.status_code == 404
+        assert _has_cjk(response.json()["detail"])
 
     def test_llm_failure_returns_200_with_fallback_question(self) -> None:
         with make_client(FailingAgent()) as (client, _):
@@ -389,7 +486,7 @@ class TestErrorHandling:
         assert body["stage"] == "BASIC"
         assert body["question"]
 
-    def test_whitespace_only_answer_returns_422_or_400(self) -> None:
+    def test_whitespace_only_answer_returns_chinese_400(self) -> None:
         with make_client(FailingAgent()) as (client, _):
             draft_id = _start(client)["draft_id"]
             response = client.post(
@@ -397,3 +494,22 @@ class TestErrorHandling:
                 json={"answer": "   "},
             )
         assert response.status_code == 400
+        assert _has_cjk(response.json()["detail"])
+        # 不得把内部英文提示透给用户
+        assert "completed" not in response.text.lower()
+        assert "not found" not in response.text.lower()
+
+    def test_empty_answer_returns_chinese_400(self) -> None:
+        # 空字符串 / 缺字段都走服务层校验，返回统一中文提示（而不是英文 422）
+        with make_client(FailingAgent()) as (client, _):
+            draft_id = _start(client)["draft_id"]
+            empty = client.post(
+                f"/api/resume/assistant/{draft_id}/answer",
+                json={"answer": ""},
+            )
+            missing = client.post(f"/api/resume/assistant/{draft_id}/answer", json={})
+
+        assert empty.status_code == 400
+        assert missing.status_code == 400
+        assert _has_cjk(empty.json()["detail"])
+        assert _has_cjk(missing.json()["detail"])

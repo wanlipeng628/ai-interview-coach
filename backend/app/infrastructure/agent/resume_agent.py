@@ -112,6 +112,60 @@ BASIC（基本信息）→ EDUCATION（教育背景）→ WORK（工作经历）
         content = self._llm_client.chat(messages)
         return self._parse_payload(content)
 
+    SUPPLEMENT_SYSTEM_PROMPT = """
+你是一名资深的简历顾问。用户已经完成了一轮完整的简历信息收集并生成过简历，现在想继续补充内容。
+
+请从用户的最新回答中抽取结构化字段，按所属分节归入 merge。
+
+硬性要求：
+1. 绝对不要编造用户没有提供的信息；merge 里只允许出现用户原话中确实提到的内容。
+2. 只抽取用户最新回答中新增的信息，不要重复已经收集过的内容。
+3. 不要输出 Markdown，不要输出解释，只输出严格 JSON。
+
+输出 JSON 格式：
+{
+  "merge": {
+    // 只给出用户最新回答确实涉及的分节；没有涉及的直接省略该分节
+    // "basic":    {"name": "", "target_role": "", "years": "", "city": ""}
+    // "education":{"school": "", "major": "", "degree": "", "period": ""}
+    // "work":     {"company": "", "role": "", "period": "", "highlights": ["..."]}
+    // "projects": {"name": "", "background": "", "role": "", "stack": "", "challenge": "", "result": ""}
+    // "skills":   ["..."]
+    // "intent":   {"position": "", "city": "", "notes": ""}
+  }
+}
+""".strip()
+
+    def extract_supplement(
+        self,
+        *,
+        target_role: str | None,
+        sections: dict,
+        history: list[dict],
+    ) -> dict:
+        """抽取「已完成草稿」补充回答中的结构化字段。
+
+        与 generate_next_question 不同，这里不区分当前分节：模型自行判断补充内容
+        属于哪个分节，返回值形如 {"merge": {"work": {...}, "skills": [...]}}。
+        输出非 JSON 时返回 {"merge": {}}，由调用方决定是否兜底。
+        """
+        messages = [
+            {"role": "system", "content": self.SUPPLEMENT_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"用户目标岗位：{target_role or '未提供'}\n"
+                    f"当前已收集的结构化信息：\n{json.dumps(sections, ensure_ascii=False)}\n\n"
+                    "本会话对话历史：\n"
+                    f"{self._format_history(history)}\n\n"
+                    "请抽取用户最新回答中新增的结构化字段，按分节归入 merge。"
+                    "记住：只输出严格 JSON。"
+                ),
+            },
+        ]
+        content = self._llm_client.chat(messages)
+        return {"merge": self._parse_payload(content).get("merge") or {}}
+
     def generate_resume(self, *, sections: dict, target_role: str | None) -> str:
         """Generate the final Markdown resume from collected sections."""
         messages = [

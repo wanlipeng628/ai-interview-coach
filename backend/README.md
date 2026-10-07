@@ -33,9 +33,13 @@ Open:
 一次只问一个问题，同一分节最多追问 2 轮，用户说「没有」跳节、说「帮我生成吧」直接结束。
 
 - `POST /api/resume/assistant/start`：开始引导，返回第一个问题（201）
-- `POST /api/resume/assistant/{draft_id}/answer`：提交回答，返回下一个问题或 `ready_to_finalize`
-- `POST /api/resume/assistant/{draft_id}/finalize`：生成 Markdown 简历并写入 `resume_profiles`（幂等）
+- `POST /api/resume/assistant/{draft_id}/answer`：提交回答，返回下一个问题或 `ready_to_finalize`；
+  草稿为 `COMPLETED` 时仍可继续提交，回答会作为补充并入对应分节，不会重新推进分节
+- `POST /api/resume/assistant/{draft_id}/finalize`：生成 Markdown 简历并写入 `resume_profiles`（可迭代：
+  每次都重新生成并覆盖当前用户的默认简历，`profile_id` 保持不变）
 - `GET /api/resume/assistant/{draft_id}`：查询草稿状态（刷新 / 续聊）
+
+错误提示统一为中文文案：草稿不存在返回 404，回答为空返回 400，不会把内部英文信息透给前端。
 
 QA 复现脚本：`bash scripts/qa_resume_assistant.sh`（需先启动后端，依赖 curl + python）。
 

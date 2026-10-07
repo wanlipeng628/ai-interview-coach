@@ -24,7 +24,9 @@ class StartDraftResponse(BaseModel):
 
 
 class SubmitAnswerRequest(BaseModel):
-    answer: str = Field(..., min_length=1)
+    # 不设 min_length：空白回答交由服务层校验，返回统一的中文错误提示，
+    # 避免 Pydantic 直接抛出英文校验信息给用户。
+    answer: str = Field(default="", max_length=5000)
 
 
 class AnswerResponse(BaseModel):
@@ -41,7 +43,8 @@ class FinalizeResponse(BaseModel):
     profile_id: int
     title: str
     content: str
-    summary: str | None = None
+    # 与前端契约保持一致：始终返回字符串（无摘要时为空串），前端按非空 string 使用
+    summary: str = ""
 
 
 class DraftMessageResponse(BaseModel):

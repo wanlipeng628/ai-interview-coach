@@ -22,6 +22,7 @@ from app.domain.resume.entities import (
     ResumeDraftStatus,
     empty_sections,
 )
+from app.domain.resume.errors import ResumeAnswerEmptyError, ResumeDraftNotFoundError
 from app.infrastructure.agent.resume_agent import ResumeAgent
 from app.infrastructure.repositories.resume_draft_repository import ResumeDraftRepository
 from app.infrastructure.repositories.resume_repository import ResumeRepository
@@ -57,6 +58,9 @@ STAGE_SECTION_KEY: dict[str, str] = {
     "SKILL": "skills",
     "INTENT": "intent",
 }
+
+# sections 中的所有分节键（已完成的草稿做补充抽取时按此遍历）
+SECTION_KEYS: tuple[str, ...] = ("basic", "education", "work", "projects", "skills", "intent")
 
 DICT_SECTION_FIELDS: dict[str, list[str]] = {
     "basic": ["name", "target_role", "years", "city"],
@@ -183,13 +187,26 @@ class ResumeAssistantService:
         """Record the user's answer and decide the next guidance step."""
         draft = self._draft_repository.get(user_id, draft_id)
         if draft is None:
-            raise ValueError("Resume draft not found")
-        if draft.is_completed:
-            raise ValueError("Resume draft is already completed")
+            raise ResumeDraftNotFoundError()
 
         answer = (request.answer or "").strip()
         if not answer:
-            raise ValueError("Answer cannot be empty")
+            raise ResumeAnswerEmptyError()
+
+        # 已完成的草稿：仍可继续接受补充。只把回答并入对应分节，
+        # 不推进分节、不改变状态，用户后续可再次 finalize 重新生成。
+        if draft.is_completed:
+            draft.messages.append(self._build_message("user", answer, DONE_STAGE))
+            self._merge_supplement(draft)
+            self._draft_repository.save(draft)
+            return AnswerResponse(
+                draft_id=draft.session_id,
+                status=draft.status,
+                stage=DONE_STAGE,
+                question=None,
+                ready_to_finalize=True,
+                progress=self._progress(DONE_STAGE),
+            )
 
         current_stage = draft.stage
         draft.messages.append(self._build_message("user", answer, current_stage))
@@ -222,16 +239,16 @@ class ResumeAssistantService:
             target_stage = self._next_stage(current_stage)
             if target_stage == DONE_STAGE:
                 return self._complete_draft(draft)
-            question = str(agent_result.get("next_section_question") or "").strip() or self._first_question(
-                target_stage, draft.target_role
-            )
+            question = str(
+                agent_result.get("next_section_question") or ""
+            ).strip() or self._first_question(target_stage, draft.target_role)
             return self._advance_to(draft, target_stage, question=question)
 
         # 继续追问当前分节
         draft.follow_up_count += 1
-        question = str(agent_result.get("follow_up_question") or "").strip() or self._follow_up_question(
-            current_stage
-        )
+        question = str(
+            agent_result.get("follow_up_question") or ""
+        ).strip() or self._follow_up_question(current_stage)
         draft.messages.append(self._build_message("assistant", question, current_stage))
         self._draft_repository.save(draft)
         return AnswerResponse(
@@ -244,16 +261,14 @@ class ResumeAssistantService:
         )
 
     def finalize(self, user_id: int, draft_id: str) -> FinalizeResponse:
-        """Generate the Markdown resume and persist it as the user's profile."""
+        """Generate the Markdown resume and persist it as the user's profile.
+
+        反复调用会重新生成并覆盖当前用户的默认简历（可迭代语义），
+        而不是直接返回上一次的结果，以便用户补充信息后再次生成。
+        """
         draft = self._draft_repository.get(user_id, draft_id)
         if draft is None:
-            raise ValueError("Resume draft not found")
-
-        # 幂等：已生成过则直接返回已保存的简历
-        if draft.profile_id is not None:
-            existing = self._resume_repository.get_by_id(user_id, draft.profile_id)
-            if existing is not None:
-                return self._to_finalize_response(draft, existing)
+            raise ResumeDraftNotFoundError()
 
         content = self._safe_generate_resume(draft)
         profile = self._resume_repository.upsert_default(
@@ -273,7 +288,7 @@ class ResumeAssistantService:
         """Fetch full draft state for refresh / resume conversation."""
         draft = self._draft_repository.get(user_id, draft_id)
         if draft is None:
-            raise ValueError("Resume draft not found")
+            raise ResumeDraftNotFoundError()
 
         return DraftDetailResponse(
             draft_id=draft.session_id,
@@ -308,7 +323,9 @@ class ResumeAssistantService:
             progress=self._progress(DONE_STAGE),
         )
 
-    def _advance_to(self, draft: ResumeDraft, target_stage: str, *, question: str) -> AnswerResponse:
+    def _advance_to(
+        self, draft: ResumeDraft, target_stage: str, *, question: str
+    ) -> AnswerResponse:
         draft.stage = target_stage
         draft.follow_up_count = 0
         draft.messages.append(self._build_message("assistant", question, target_stage))
@@ -405,11 +422,36 @@ class ResumeAssistantService:
         if key is None or not isinstance(merge, dict) or not merge:
             return
         payload = merge[key] if key in merge else merge
+        self._merge_section_payload(sections, key, payload)
+
+    def _merge_supplement(self, draft: ResumeDraft) -> None:
+        """把「已完成草稿」的补充回答并入对应分节（不推进分节）。"""
+        try:
+            agent = self._get_agent()
+            result = agent.extract_supplement(
+                target_role=draft.target_role,
+                sections=draft.sections,
+                history=draft.messages,
+            )
+        except Exception:
+            logger.exception("resume agent failed to extract supplement")
+            return
+
+        merge = result.get("merge") if isinstance(result, dict) else None
+        if not isinstance(merge, dict) or not merge:
+            return
+        for key in SECTION_KEYS:
+            if key in merge:
+                self._merge_section_payload(draft.sections, key, merge[key])
+
+    def _merge_section_payload(self, sections: dict, key: str, payload: object) -> None:
         if payload is None:
             return
 
         if key in DICT_SECTION_FIELDS:
-            self._merge_dict_section(sections.setdefault(key, {}), payload, DICT_SECTION_FIELDS[key])
+            self._merge_dict_section(
+                sections.setdefault(key, {}), payload, DICT_SECTION_FIELDS[key]
+            )
         elif key in LIST_SECTION_FIELDS:
             key_field, fields = LIST_SECTION_FIELDS[key]
             self._merge_list_section(sections.setdefault(key, []), payload, key_field, fields)
@@ -469,7 +511,9 @@ class ResumeAssistantService:
         for field in fields:
             value = item.get(field)
             if field == "highlights":
-                highlights = [str(entry).strip() for entry in value] if isinstance(value, list) else []
+                highlights = (
+                    [str(entry).strip() for entry in value] if isinstance(value, list) else []
+                )
                 if isinstance(value, str) and value.strip():
                     highlights = [value.strip()]
                 highlights = [entry for entry in highlights if entry]
@@ -534,7 +578,9 @@ class ResumeAssistantService:
             lines.append("## 教育背景")
             for item in education:
                 head = "，".join(
-                    part for part in (item.get("school"), item.get("major"), item.get("degree")) if part
+                    part
+                    for part in (item.get("school"), item.get("major"), item.get("degree"))
+                    if part
                 )
                 period = item.get("period")
                 lines.append(f"- {head}" + (f"（{period}）" if period else ""))
@@ -567,7 +613,9 @@ class ResumeAssistantService:
                         lines.append(f"- {label}：{item[field]}")
             lines.append("")
 
-        skills = [str(skill).strip() for skill in (sections.get("skills") or []) if str(skill).strip()]
+        skills = [
+            str(skill).strip() for skill in (sections.get("skills") or []) if str(skill).strip()
+        ]
         if skills:
             lines.append("## 技能栈")
             lines.append("- " + "、".join(skills))
@@ -600,7 +648,7 @@ class ResumeAssistantService:
             profile_id=profile.id,
             title=profile.title,
             content=profile.content,
-            summary=profile.summary,
+            summary=profile.summary or "",
         )
 
     @staticmethod

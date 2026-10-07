@@ -82,8 +82,26 @@ get "$BASE_URL/api/resume/profile"
 echo
 
 echo
-echo "--- 6. finalize 幂等（应返回同一 profile_id / content） ---"
-post "$API/$DRAFT_ID/finalize" '{}'
+echo "--- 6. finalize 可迭代：重复调用应重新生成并覆盖同一份 profile_id ---"
+RE_FINALIZE=$(post "$API/$DRAFT_ID/finalize" '{}')
+echo "$RE_FINALIZE"
+echo "    profile_id=$(jget "$RE_FINALIZE" .profile_id)（应与第 4 步一致）"
+
+echo
+echo "--- 7. 已完成草稿仍可继续补充（方案 A：不再 400） ---"
+SUPPLEMENT=$(post "$API/$DRAFT_ID/answer" "$(body answer "再补充一个开源项目：我给某开源项目提过 PR，现在 star 1k")")
+echo "$SUPPLEMENT"
+echo "    status=$(jget "$SUPPLEMENT" .status)  stage=$(jget "$SUPPLEMENT" .stage)  ready_to_finalize=$(jget "$SUPPLEMENT" .ready_to_finalize)"
+
+echo
+echo "--- 8. 补充后重新生成：profile_id 不变、内容应反映新增信息 ---"
+REGEN=$(post "$API/$DRAFT_ID/finalize" '{}')
+echo "$REGEN"
+echo "    profile_id=$(jget "$REGEN" .profile_id)"
+
+echo
+echo "--- 9. 错误提示应为中文（404 不应透出英文 detail） ---"
+curl -sS "$API/not-a-real-draft"
 echo
 
 echo
@@ -116,8 +134,16 @@ post "$API/$DRAFT_B/finalize" '{}'
 echo
 
 echo
-echo "--- B5. 不存在的 draft 应返回 404 ---"
+echo "--- B5. 不存在的 draft 应返回 404 + 中文 detail ---"
 curl -sS -o /dev/null -w "HTTP %{http_code}\n" "$API/not-a-real-draft"
+
+echo
+echo "--- B6. 空白回答应返回 400 + 中文 detail ---"
+curl -sS -X POST "$API/$DRAFT_B/answer" -H 'Content-Type: application/json' -d "$(body answer '   ')"
+
+echo
+echo "--- B7. 空回答（空字符串）应返回 400 + 中文 detail ---"
+curl -sS -X POST "$API/$DRAFT_B/answer" -H 'Content-Type: application/json' -d '{"answer": ""}'
 
 echo
 echo "全部场景执行完毕。"
