@@ -16,15 +16,16 @@
 }
 
 // 按 Element Plus 官方比例生成 light/dark 系列色
-// EP 官方：light-3/5/7/8/9 分别混入 70%/50%/30%/20%/10% 白
+// EP 官方：light-N = mix(#fff, base, N × 10%)，即 light-3/5/7/8/9
+//         分别混入 30%/50%/70%/80%/90% 白（N 越大越接近白，light-9 为最浅底）
 //         dark-2 混入 20% 黑
 @function ep-light($base, $level) {
   $white-amount: 0;
-  @if $level == 3 { $white-amount: 70%; }
+  @if $level == 3 { $white-amount: 30%; }
   @else if $level == 5 { $white-amount: 50%; }
-  @else if $level == 7 { $white-amount: 30%; }
-  @else if $level == 8 { $white-amount: 20%; }
-  @else if $level == 9 { $white-amount: 10%; }
+  @else if $level == 7 { $white-amount: 70%; }
+  @else if $level == 8 { $white-amount: 80%; }
+  @else if $level == 9 { $white-amount: 90%; }
   @return color.mix(#fff, $base, $white-amount);
 }
 
@@ -117,7 +118,14 @@
 }
 
 // —— Tag 组件：light 模式接入 token 浅底 ——
+// 文字一律取"文本档"：EP 默认把 light tag 的文字设为图形档语义色，
+// 放在 light-9 浅底上普遍低于 4.5:1（主色标签约 3.9:1）。
 .el-tag--light {
+  &.el-tag--primary {
+    --el-tag-bg-color: var(--c-primary-50);
+    --el-tag-text-color: var(--c-primary-600);
+    --el-tag-border-color: transparent;
+  }
   &.el-tag--success {
     --el-tag-bg-color: var(--c-success-light);
     --el-tag-text-color: var(--c-success-text);
@@ -138,5 +146,43 @@
     --el-tag-bg-color: var(--c-info-light);
     --el-tag-text-color: var(--c-info-text);
     --el-tag-border-color: transparent;
+  }
+}
+
+// —— Button：plain / text / link 变体的文字取"文本档" ——
+// EP 把这三类变体的文字设为图形档语义色（--el-color-{type}），
+// 白底上 warning 仅 2.15:1、danger 约 3.1:1，均低于 AA 4.5:1。
+// 设计 token 已区分图形档（大面积）与文本档（文字，白底 AA），这里收敛到文本档。
+// 主色按钮不在此列：link 文字品牌色 #2f6bff 白底 4.50:1 已达 AA。
+@each $name, $text in (
+  success: $c-success-text,
+  warning: $c-warning-text,
+  danger: $c-danger-text,
+  info: $c-info-text
+) {
+  .el-button--#{$name}.is-plain,
+  .el-button--#{$name}.is-text,
+  .el-button--#{$name}.is-link {
+    --el-button-text-color: #{$text};
+    --el-button-hover-link-text-color: #{$text};
+    --el-button-active-color: #{$text};
+  }
+}
+
+// —— Alert：light 变体的文字取"文本档" ——
+// EP 把 light alert 的文字设为图形档语义色（--el-color-{type}），
+// 放在 light-9 浅底上 warning 约 2.2:1、error 约 3.1:1，低于 AA。
+@each $name, $text in (
+  success: $c-success-text,
+  warning: $c-warning-text,
+  error: $c-danger-text,
+  info: $c-info-text
+) {
+  .el-alert--#{$name}.is-light {
+    color: #{$text};
+
+    .el-alert__description {
+      color: #{$text};
+    }
   }
 }
