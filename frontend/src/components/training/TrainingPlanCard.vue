@@ -2,7 +2,6 @@
   <el-card shadow="never" class="plan-card card card--float">
     <PageHeader variant="plain" eyebrow="系统推荐" :title="plan.title" :description="plan.description" />
     <div class="meta">
-      <strong>{{ plan.estimatedTime }}</strong>
       <strong>{{ plan.topics }} 个任务</strong>
     </div>
   </el-card>

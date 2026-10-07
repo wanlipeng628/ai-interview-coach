@@ -34,6 +34,5 @@ export interface TrainingTopic {
 export interface TrainingPlan {
   title: string
   description: string
-  estimatedTime: string
   topics: number
 }

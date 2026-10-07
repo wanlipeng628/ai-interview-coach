@@ -22,15 +22,15 @@
 
     <div v-show="!isMobile || expanded" class="info-list">
       <div>
-        <span>当前岗位</span>
+        <span class="info-list__label">当前岗位</span>
         <strong>{{ info.jobRole }}</strong>
       </div>
       <div>
-        <span>面试时长</span>
+        <span class="info-list__label">面试时长</span>
         <strong>{{ formattedDuration }} / {{ info.durationLimitMinutes }} 分钟</strong>
       </div>
       <div>
-        <span>面试状态</span>
+        <span class="info-list__label">面试状态</span>
         <el-tag :type="info.status === 'finished' ? 'success' : 'primary'">
           {{ info.status === 'finished' ? '已结束' : '进行中' }}
         </el-tag>
@@ -78,7 +78,8 @@ const formattedDuration = computed(() => {
     gap: 6px;
   }
 
-  span {
+  // 标签文字：用类名而非裸 span，避免命中同容器内 el-tag 的根 span
+  &__label {
     color: var(--c-text-tertiary);
     font-size: 13px;
   }

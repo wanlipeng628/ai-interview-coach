@@ -32,7 +32,6 @@ export const useTrainingStore = defineStore('training', {
         state.tasks.length > 0
           ? '这些任务来自你的面试报告和问答复盘，建议优先处理高优先级问题。'
           : '完成一次面试并生成报告后，系统会自动沉淀训练任务。',
-      estimatedTime: `${Math.max(state.tasks.length, 1)} 项`,
       topics: state.tasks.length,
     }),
   },

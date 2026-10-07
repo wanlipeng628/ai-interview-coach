@@ -2,7 +2,7 @@
   <el-card shadow="never" class="summary-card card card--float is-emphasis">
     <div class="score-line">
       <strong class="score">{{ summary.overallScore }}</strong>
-      <span>/ 100</span>
+      <span class="score-unit">/ 100</span>
       <el-tag type="warning" effect="light">{{ summary.level }}</el-tag>
     </div>
     <p>超过了 {{ summary.percentile }}% 的求职者</p>
@@ -40,7 +40,9 @@ defineProps<{ summary: ReportSummary }>()
   line-height: 1;
 }
 
-span,
+// 只给「/ 100」与说明段上色；不要用裸 span 选择器，
+// 否则会命中同容器内 el-tag 的根 span，把标签文字色顶掉。
+.score-unit,
 p {
   color: var(--c-text-tertiary);
 }
