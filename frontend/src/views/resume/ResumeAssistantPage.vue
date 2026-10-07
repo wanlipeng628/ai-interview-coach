@@ -22,10 +22,7 @@
           />
         </template>
         <template #actions>
-          <el-tag v-if="assistant.usingMock" type="warning" size="large" effect="light">
-            本地演示数据
-          </el-tag>
-          <el-tag v-else size="large" effect="light">对话引导</el-tag>
+          <el-tag size="large" effect="light">对话引导</el-tag>
         </template>
       </PageHeader>
 

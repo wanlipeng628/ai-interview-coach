@@ -6,12 +6,6 @@ import {
   startResumeAssistantApi,
   submitResumeAnswerApi,
 } from '@/api/resumeAssistant.api'
-import {
-  mockFinalizeResumeAssistant,
-  mockGetResumeAssistant,
-  mockStartResumeAssistant,
-  mockSubmitResumeAnswer,
-} from '@/api/resumeAssistant.mock'
 import type {
   AssistantMessage,
   AssistantProgress,
@@ -30,29 +24,12 @@ interface ResumeAssistantState {
   messages: AssistantMessage[]
   progress: AssistantProgress
   readyToFinalize: boolean
-  usingMock: boolean
   starting: boolean
   submitting: boolean
   finalizing: boolean
   errorMessage: string
   result: ResumeResult | null
 }
-
-// 后端 /api/resume/assistant/* 未实现（404/405）、进程不可达（网络错误），
-// 或 Vite 代理在上游未启动时返回的 5xx，都视为不可用
-const isBackendUnavailable = (error: unknown): boolean => {
-  if (typeof error !== 'object' || error === null) return false
-  const status = (error as { response?: { status?: number } }).response?.status
-  if (!status) return true
-  return status === 404 || status === 405 || status >= 500
-}
-
-// 本地演示兜底仅在开发环境启用：生产环境的 5xx（如 LLM 调用失败的 502）
-// 是真实错误，必须如实暴露，不能被演示数据掩盖。
-const MOCK_FALLBACK_ENABLED = import.meta.env.DEV
-
-const shouldFallbackToMock = (error: unknown): boolean =>
-  MOCK_FALLBACK_ENABLED && isBackendUnavailable(error)
 
 const normalizeSections = (value: unknown): ResumeSection[] => {
   if (!Array.isArray(value)) return []
@@ -63,9 +40,8 @@ const normalizeSections = (value: unknown): ResumeSection[] => {
 
 const getErrorMessage = (error: unknown, fallback: string) => {
   if (typeof error === 'object' && error !== null && 'message' in error) {
-    const response = (error as { response?: { status?: number; data?: { detail?: string } } }).response
-    if (response?.data?.detail) return response.data.detail
-    if (MOCK_FALLBACK_ENABLED && isBackendUnavailable(error)) return '后端简历助手接口未就绪，已使用本地演示数据'
+    const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+    if (detail) return detail
   }
   return fallback
 }
@@ -84,7 +60,6 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
     messages: [],
     progress: { completed: [], current: 'BASIC' },
     readyToFinalize: false,
-    usingMock: false,
     starting: false,
     submitting: false,
     finalizing: false,
@@ -130,7 +105,10 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
       this.errorMessage = ''
       this.result = null
       try {
-        const response = await this.callStart(targetRole, title)
+        const response = await startResumeAssistantApi({
+          target_role: targetRole?.trim() || undefined,
+          title: title?.trim() || undefined,
+        })
         this.draftId = response.draft_id
         this.status = response.status
         this.stage = toStage(response.stage, 'BASIC')
@@ -146,32 +124,16 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
       }
     },
 
-    async callStart(targetRole?: string, title?: string) {
-      try {
-        const response = await startResumeAssistantApi({
-          target_role: targetRole?.trim() || undefined,
-          title: title?.trim() || undefined,
-        })
-        this.usingMock = false
-        return response
-      } catch (error) {
-        if (!shouldFallbackToMock(error)) throw error
-        this.usingMock = true
-        return mockStartResumeAssistant({ target_role: targetRole, title })
-      }
-    },
-
     async restore(draftId: string) {
       if (this.starting) return
       this.starting = true
       this.errorMessage = ''
       this.result = null
       try {
-        const detail = await this.callDetail(draftId)
+        const detail = await getResumeAssistantApi(draftId)
         this.draftId = detail.draft_id
         this.status = detail.status
         this.stage = toStage(detail.stage, 'BASIC')
-        this.usingMock = draftId.startsWith('mock-')
         this.messages = (detail.messages ?? [])
           .filter((item) => item.content?.trim())
           .map((item) => ({
@@ -191,17 +153,6 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
       }
     },
 
-    async callDetail(draftId: string) {
-      try {
-        const response = await getResumeAssistantApi(draftId)
-        this.usingMock = false
-        return response
-      } catch (error) {
-        if (!shouldFallbackToMock(error) || !draftId.startsWith('mock-')) throw error
-        return mockGetResumeAssistant(draftId)
-      }
-    },
-
     async sendAnswer(raw: string) {
       const text = raw.trim()
       if (!text || this.busy) return
@@ -211,7 +162,7 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
       this.submitting = true
       this.errorMessage = ''
       try {
-        const response = await this.callAnswer(text)
+        const response = await submitResumeAnswerApi(this.draftId, { answer: text })
         this.readyToFinalize = response.ready_to_finalize
         this.applyProgress(response.progress)
         if (response.question) {
@@ -227,23 +178,12 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
       }
     },
 
-    async callAnswer(answer: string) {
-      try {
-        const response = await submitResumeAnswerApi(this.draftId, { answer })
-        this.usingMock = false
-        return response
-      } catch (error) {
-        if (!shouldFallbackToMock(error) || !this.usingMock) throw error
-        return mockSubmitResumeAnswer(this.draftId, answer)
-      }
-    },
-
     async finalize() {
       if (this.finalizing) return
       this.finalizing = true
       this.errorMessage = ''
       try {
-        const response = await this.callFinalize()
+        const response = await finalizeResumeAssistantApi(this.draftId)
         this.result = {
           draftId: response.draft_id,
           profileId: response.profile_id,
@@ -257,17 +197,6 @@ export const useResumeAssistantStore = defineStore('resumeAssistant', {
         throw error
       } finally {
         this.finalizing = false
-      }
-    },
-
-    async callFinalize() {
-      try {
-        const response = await finalizeResumeAssistantApi(this.draftId)
-        this.usingMock = false
-        return response
-      } catch (error) {
-        if (!shouldFallbackToMock(error) || !this.usingMock) throw error
-        return mockFinalizeResumeAssistant(this.draftId)
       }
     },
   },
