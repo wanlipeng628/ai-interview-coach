@@ -59,6 +59,16 @@ STAGE_SECTION_KEY: dict[str, str] = {
     "INTENT": "intent",
 }
 
+# 分节中文名，用于向用户列出未完成分节
+STAGE_NAMES: dict[str, str] = {
+    "BASIC": "基本信息",
+    "EDUCATION": "教育背景",
+    "WORK": "工作经历",
+    "PROJECT": "项目经历",
+    "SKILL": "技能栈",
+    "INTENT": "求职意向",
+}
+
 # sections 中的所有分节键（已完成的草稿做补充抽取时按此遍历）
 SECTION_KEYS: tuple[str, ...] = ("basic", "education", "work", "projects", "skills", "intent")
 
@@ -108,6 +118,10 @@ FINALIZE_FILLER = frozenset("吧了呢呀啊嘛哦嗯好行")
 
 # 整句意图匹配前统一去掉空白与中英文标点，避免标点影响判断
 ANSWER_NOISE_PATTERN = re.compile(r"[\s，。！？、,.!?;；:：'\"“”‘’]")
+
+# 模型偶尔会把整份简历用 ``` 代码块围栏整体包裹（prompt 已要求不要输出围栏）。
+# 落库前剥掉这层围栏，避免前端按 Markdown 渲染成一大段代码、摘要也被清空。
+WRAPPING_FENCE_PATTERN = re.compile(r"^\s*```[^\n]*\n(.*?)\n?\s*```\s*$", re.DOTALL)
 
 # 用户明确表示该节没有内容的触发词
 SKIP_EXACT: frozenset[str] = frozenset(
@@ -233,9 +247,13 @@ class ResumeAssistantService:
         current_stage = draft.stage
         draft.messages.append(self._build_message("user", answer, current_stage))
 
-        # 1. 用户主动结束：直接进入 finalize
+        # 1. 用户主动结束：仅当分节已全部完成（或已跳过）时才结束；
+        #    仍有分节未完成时只给提示，不置 COMPLETED、不虚报进度。
         if self._is_finalize_intent(answer):
-            return self._complete_draft(draft)
+            pending = self._pending_sections(current_stage)
+            if not pending:
+                return self._complete_draft(draft)
+            return self._prompt_pending_sections(draft, pending)
 
         # 2. 用户明确跳过当前分节：标记为空并推进
         if self._is_skip_answer(answer):
@@ -368,6 +386,44 @@ class ResumeAssistantService:
                 return STAGE_ORDER[index + 1]
         return DONE_STAGE
 
+    @staticmethod
+    def _pending_sections(current_stage: str) -> list[str]:
+        """返回尚未完成的分节（当前分节及其后的所有分节）。
+
+        分节按固定顺序推进，凡已推进过去的分节都算完成（含用户主动「跳过」的），
+        因此未完成分节就是当前分节及其后所有分节；DONE 表示已全部完成。
+        """
+        if current_stage == DONE_STAGE:
+            return []
+        if current_stage in STAGE_ORDER:
+            return list(STAGE_ORDER[STAGE_ORDER.index(current_stage) :])
+        return list(STAGE_ORDER)
+
+    def _prompt_pending_sections(
+        self, draft: ResumeDraft, pending: list[str]
+    ) -> AnswerResponse:
+        """命中结束短语但分节未齐：提示未完成分节，草稿保持 IN_PROGRESS。
+
+        不推进分节、不置 COMPLETED，progress 按真实已完成分节返回；
+        用户可继续补充，或对不需要的分节回复「没有 / 跳过」推进。
+        """
+        names = "、".join(STAGE_NAMES.get(stage, stage) for stage in pending)
+        question = (
+            f"还有这些分节没有完成：{names}。"
+            "你可以继续补充，或者回复「没有 / 跳过」把不需要的分节略过；"
+            "全部补齐（或跳过）后，再对我说「帮我生成吧」就可以了。"
+        )
+        draft.messages.append(self._build_message("assistant", question, draft.stage))
+        self._draft_repository.save(draft)
+        return AnswerResponse(
+            draft_id=draft.session_id,
+            status=draft.status,
+            stage=draft.stage,
+            question=question,
+            ready_to_finalize=False,
+            progress=self._progress(draft.stage),
+        )
+
     def _progress(self, current_stage: str) -> ProgressResponse:
         if current_stage == DONE_STAGE or current_stage not in STAGE_ORDER:
             return ProgressResponse(completed=list(STAGE_ORDER), current=DONE_STAGE)
@@ -398,9 +454,10 @@ class ResumeAssistantService:
             content = agent.generate_resume(
                 sections=draft.sections,
                 target_role=draft.target_role,
+                history=draft.messages,
             )
             if content and content.strip():
-                return content.strip()
+                return self._strip_wrapping_fence(content)
             logger.warning("resume agent returned empty content, using fallback render")
         except Exception:
             logger.exception("resume agent failed to generate resume, using fallback render")
@@ -587,6 +644,13 @@ class ResumeAssistantService:
         draft.sections.setdefault(key, defaults[key])
 
     # ------------------------------------------------------------------ 渲染
+
+    @staticmethod
+    def _strip_wrapping_fence(content: str) -> str:
+        """剥掉模型整体包裹正文的 ``` 代码块围栏；没有围栏时原样返回。"""
+        text = content.strip()
+        match = WRAPPING_FENCE_PATTERN.match(text)
+        return match.group(1).strip() if match else text
 
     def _render_fallback_markdown(self, draft: ResumeDraft) -> str:
         """Deterministic Markdown render used when the LLM is unavailable.

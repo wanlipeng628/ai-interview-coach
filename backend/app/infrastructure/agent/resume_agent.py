@@ -60,14 +60,39 @@ BASIC（基本信息）→ EDUCATION（教育背景）→ WORK（工作经历）
 """.strip()
 
     RESUME_SYSTEM_PROMPT = """
-你是一名资深的简历撰写专家。请根据给定的结构化信息，生成一份完整、专业、简洁的 Markdown 简历。
+你是一名简历撰写助手。任务是把用户**已经提供**的信息整理成一份 Markdown 简历。
 
-硬性要求：
-1. 只能使用给定 sections 中出现过的信息，绝对不要编造任何公司、项目、学校、技能或数据。
-2. 缺失的信息直接省略，不要用「待补充」「N/A」等占位内容填充。
-3. 使用标准简历结构：一级标题为姓名（或简历标题），随后按「教育背景 / 工作经历 / 项目经历 / 技能栈 / 求职意向」分节，只输出有内容的分节。
-4. 工作经历与项目经历优先用有条理的 bullet 表达，突出个人职责与可量化结果（仅当用户提供了数据时）。
-5. 直接输出 Markdown 正文，不要输出任何解释或代码块围栏。
+最重要的一条：**只允许使用用户已经提供的信息，严禁新增任何用户未提供的事实。**
+简历是要拿去投递、面试会被逐个追问的，任何一个用户没说过的细节都会让用户当场穿帮。
+
+你唯一被允许做的三件事：
+1. 重新组织用户已提供信息的顺序与层次；
+2. 改写句式、润色表达，使其更书面、更简洁；
+3. 合并重复的表述。
+
+以下是**严格禁止新增**的内容类别（用户原话里没出现的，一个字都不许写）：
+1. 量化结果与指标：任何提升幅度、百分比、QPS、并发量、延时（P99/P95/平均）、准确率、用户量、订单量、覆盖人数等数字；
+2. 技术手段与中间件：异步化、缓存、读写分离、分库分表、消息队列、限流、熔断、向量召回、热度降权等实现方案，以及任何具体中间件/框架/库名称（Redis、Kafka、Pandas、Scikit-learn 等）；
+3. 架构方案：微服务、DDD、事件驱动、领域拆分等；
+4. 版本号：v1.0、v2.3、第几代等；
+5. 荣誉与致谢：获奖、榜单、Maintainer 致谢/认可、被某方采用等；
+6. 业务规模：日均百万级、千万用户、GMV、峰值等；
+7. 团队规模：带几人团队、跨部门协作人数等。
+
+信息不足时的处理：**宁可留白、写短，也不要补全。** 缺失的信息整句省略，
+不要用「待补充」「N/A」等占位内容填充，也不要为了句式完整而脑补细节。
+用户明确说「没有 / 跳过」的分节，直接省略该分节，不要输出「无」「暂无」之类的空节标题。
+
+输出前必须自检（逐句执行）：
+逐条检查你写下的每一句事实性表述，尤其是数字、技术名词、版本号、荣誉、规模，
+逐条自问「这在用户提供的回答或信息里能找到出处吗？」
+- 找不到出处的：删掉该表述，或改写成不包含该事实的版本。
+- 拿不准的：按「用户没说过」处理，删掉。
+
+结构要求：
+1. 使用标准简历结构：一级标题为姓名（或简历标题），随后按「教育背景 / 工作经历 / 项目经历 / 技能栈 / 求职意向」分节，只输出有内容的分节。
+2. 工作经历与项目经历用有条理的 bullet 表达，突出用户明确说过的个人职责与结果。
+3. 直接输出 Markdown 正文，不要输出任何解释、说明或代码块围栏。
 """.strip()
 
     def __init__(self, llm_client: OpenAICompatibleClient | None = None) -> None:
@@ -166,16 +191,30 @@ BASIC（基本信息）→ EDUCATION（教育背景）→ WORK（工作经历）
         content = self._llm_client.chat(messages)
         return {"merge": self._parse_payload(content).get("merge") or {}}
 
-    def generate_resume(self, *, sections: dict, target_role: str | None) -> str:
-        """Generate the final Markdown resume from collected sections."""
+    def generate_resume(
+        self,
+        *,
+        sections: dict,
+        target_role: str | None,
+        history: list[dict] | None = None,
+    ) -> str:
+        """Generate the final Markdown resume from collected sections.
+
+        history 只取用户侧发言，作为「每句事实是否有出处」的核对依据；
+        助手侧的引导问题（含示例句式）不参与，避免把示例误当成用户提供的事实。
+        """
         messages = [
             {"role": "system", "content": self.RESUME_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
-                    f"用户目标岗位：{target_role or '未提供'}\n"
-                    f"结构化信息：\n{json.dumps(sections, ensure_ascii=False)}\n\n"
-                    "请生成完整的 Markdown 简历。"
+                    f"用户目标岗位：{target_role or '未提供'}\n\n"
+                    f"已收集的结构化信息（唯一可用素材）：\n"
+                    f"{json.dumps(sections, ensure_ascii=False)}\n\n"
+                    f"用户在对话中的原始回答（唯一可用素材，用于核对每句是否有出处）：\n"
+                    f"{self._format_user_answers(history or [])}\n\n"
+                    "请生成完整的 Markdown 简历。再次强调：只允许使用以上素材中出现过的信息，"
+                    "任何未出现在素材中的数字、技术手段、版本号、荣誉、规模都不得写入。"
                 ),
             },
         ]
@@ -204,6 +243,17 @@ BASIC（基本信息）→ EDUCATION（教育背景）→ WORK（工作经历）
             if index + 1 < len(STAGE_ORDER):
                 return STAGE_ORDER[index + 1]
         return "DONE"
+
+    @staticmethod
+    def _format_user_answers(history: list[dict]) -> str:
+        answers = [
+            str(item.get("content", "")).strip()
+            for item in history
+            if item.get("role") == "user" and str(item.get("content", "")).strip()
+        ]
+        if not answers:
+            return "（用户未留下文字回答）"
+        return "\n".join(f"- {answer}" for answer in answers)
 
     def _format_history(self, history: list[dict]) -> str:
         if not history:

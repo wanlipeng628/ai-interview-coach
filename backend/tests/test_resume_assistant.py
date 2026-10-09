@@ -11,6 +11,7 @@ from app.api.routes.resume_assistant import get_resume_assistant_service
 from app.application.resume.resume_assistant_service import ResumeAssistantService
 from app.application.resume.resume_dto import ResumeProfileResponse
 from app.infrastructure.agent.resume_agent import ResumeAgent
+from app.infrastructure.repositories.resume_repository import ResumeRepository
 from app.main import app
 
 
@@ -53,7 +54,7 @@ class FakeResumeRepository:
             id=profile_id,
             title=title,
             content=content,
-            summary=(" ".join(content.split()))[:160] or None,
+            summary=ResumeRepository._build_summary(content) or None,
             is_default=True,
             update_time=datetime.now().isoformat(),
         )
@@ -135,6 +136,16 @@ def _answer(client: TestClient, draft_id: str, answer: str) -> dict:
     response = client.post(f"/api/resume/assistant/{draft_id}/answer", json={"answer": answer})
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def _drive_to_completion(client: TestClient, draft_id: str, max_rounds: int = 30) -> dict:
+    """用普通回答走完 6 个分节，返回最后一次（置 COMPLETED）的响应。"""
+    body: dict = {}
+    for index in range(max_rounds):
+        body = _answer(client, draft_id, f"第{index + 1}轮补充说明")
+        if body.get("ready_to_finalize"):
+            return body
+    raise AssertionError("draft did not reach ready_to_finalize within bound")
 
 
 SIX_ANSWERS = [
@@ -293,15 +304,53 @@ class TestGuidanceBehaviour:
         assert body["question"]
         assert body["progress"] == {"completed": ["BASIC"], "current": "EDUCATION"}
 
-    def test_finalize_intent_completes_draft(self) -> None:
+    def test_finalize_intent_before_sections_complete_prompts_instead(self) -> None:
+        # 分节未齐时命中结束短语：只提示未完成分节，不置 COMPLETED、不虚报进度
         with make_client(FailingAgent()) as (client, _):
             draft_id = _start(client)["draft_id"]
             body = _answer(client, draft_id, "差不多了，帮我生成吧")
 
-        assert body["status"] == "COMPLETED"
-        assert body["stage"] == "DONE"
-        assert body["ready_to_finalize"] is True
-        assert body["question"] is None
+        assert body["status"] == "IN_PROGRESS"
+        assert body["stage"] == "BASIC"
+        assert body["ready_to_finalize"] is False
+        assert body["question"]
+        for label in ("基本信息", "教育背景", "工作经历", "项目经历", "技能栈", "求职意向"):
+            assert label in body["question"]
+        # 只收集到基本信息这一节还没完成，进度不得标 6 节全绿
+        assert body["progress"] == {"completed": [], "current": "BASIC"}
+
+    def test_finalize_intent_lists_only_remaining_and_skip_completes(self) -> None:
+        # 走完前 5 节后：结束短语只提示剩余的「求职意向」；跳过它即可完成收集
+        with make_client(FailingAgent()) as (client, _):
+            draft_id = _start(client)["draft_id"]
+            body: dict = {}
+            for index in range(15):
+                body = _answer(client, draft_id, f"第{index + 1}轮补充说明")
+            assert body["stage"] == "INTENT"
+
+            prompt = _answer(client, draft_id, "帮我生成吧")
+            assert prompt["status"] == "IN_PROGRESS"
+            assert prompt["stage"] == "INTENT"
+            assert prompt["ready_to_finalize"] is False
+            assert "求职意向" in prompt["question"]
+            assert "基本信息" not in prompt["question"]
+            assert prompt["progress"] == {
+                "completed": ["BASIC", "EDUCATION", "WORK", "PROJECT", "SKILL"],
+                "current": "INTENT",
+            }
+
+            done = _answer(client, draft_id, "没有")
+            assert done["status"] == "COMPLETED"
+            assert done["stage"] == "DONE"
+            assert done["ready_to_finalize"] is True
+            assert done["progress"]["completed"] == [
+                "BASIC",
+                "EDUCATION",
+                "WORK",
+                "PROJECT",
+                "SKILL",
+                "INTENT",
+            ]
 
     def test_flow_completes_without_llm_within_bound(self) -> None:
         # LLM 全程不可用时，靠追问上限仍能走完 6 个分节（6 × 3 轮回答）
@@ -323,7 +372,7 @@ class TestGuidanceBehaviour:
         # 方案 A：已完成草稿仍可继续接收回答（不再 400），且不推进分节
         with make_client(FailingAgent()) as (client, _):
             draft_id = _start(client)["draft_id"]
-            _answer(client, draft_id, "帮我生成吧")
+            _drive_to_completion(client, draft_id)
 
             body = _answer(client, draft_id, "补充一点")
 
@@ -404,6 +453,25 @@ class TestFinalizeIntentDetection:
 
 
 class TestFinalize:
+    def test_finalize_strips_wrapping_code_fence(self) -> None:
+        # 模型整体用 ``` 包裹正文时，落库内容应剥掉围栏，摘要也应正常
+        fenced = (
+            "```markdown\n# 张三\n\n## 工作经历\n\n"
+            "### A 公司 · 后端工程师\n- 负责订单系统性能优化\n```"
+        )
+        agent = StubResumeAgent(steps=_complete_steps(), resume_content=fenced)
+        with make_client(agent) as (client, _):
+            draft_id = _start(client)["draft_id"]
+            for answer in SIX_ANSWERS:
+                _answer(client, draft_id, answer)
+            payload = client.post(f"/api/resume/assistant/{draft_id}/finalize").json()
+
+        assert payload["content"].startswith("# 张三")
+        assert "```" not in payload["content"]
+        assert payload["summary"]
+        for marker in ("#", "```", "- "):
+            assert marker not in payload["summary"]
+
     def test_finalize_always_regenerates(self) -> None:
         # 方案 A：finalize 不再幂等返回旧简历，每次都重新生成并覆盖同一份 profile
         agent = StubResumeAgent(steps=_complete_steps(), resume_content="# 简历\n\n张三")
@@ -446,7 +514,7 @@ class TestFinalize:
         # LLM 不可用时补充回答也不能报错，只是抽不到结构化字段
         with make_client(FailingAgent()) as (client, _):
             draft_id = _start(client)["draft_id"]
-            _answer(client, draft_id, "帮我生成吧")
+            _drive_to_completion(client, draft_id)
             client.post(f"/api/resume/assistant/{draft_id}/finalize")
             body = _answer(client, draft_id, "再补充一点内容")
             again = client.post(f"/api/resume/assistant/{draft_id}/finalize")
@@ -573,3 +641,110 @@ class TestErrorHandling:
         assert missing.status_code == 400
         assert _has_cjk(empty.json()["detail"])
         assert _has_cjk(missing.json()["detail"])
+
+
+class TestResumePromptGuardrails:
+    """生成简历的 prompt 必须显式禁止新增用户未提供的事实。"""
+
+    FORBIDDEN_CATEGORIES = (
+        "量化结果",
+        "技术手段",
+        "架构方案",
+        "版本号",
+        "荣誉",
+        "业务规模",
+        "团队规模",
+    )
+
+    def test_prompt_lists_forbidden_categories(self) -> None:
+        prompt = ResumeAgent.RESUME_SYSTEM_PROMPT
+        for category in self.FORBIDDEN_CATEGORIES:
+            assert category in prompt, category
+
+    def test_prompt_requires_grounding_self_check(self) -> None:
+        prompt = ResumeAgent.RESUME_SYSTEM_PROMPT
+        # 输出前逐条自检、核对事实出处
+        assert "自检" in prompt
+        assert "出处" in prompt
+        # 明确「宁可留白，不得补全」
+        assert "留白" in prompt
+
+    def test_generate_resume_grounds_on_user_answers_only(self) -> None:
+        captured: dict = {}
+
+        class CapturingClient:
+            def chat(self, messages):
+                captured["messages"] = messages
+                return "# 张三"
+
+        agent = ResumeAgent(llm_client=CapturingClient())
+        history = [
+            {
+                "role": "assistant",
+                "content": "可以这样写：负责 XX 模块，用 XX 方案把 XX 从 A 优化到 B",
+            },
+            {"role": "user", "content": "负责订单系统的性能优化，QPS 从 500 提升到 3000"},
+        ]
+        agent.generate_resume(
+            sections={"work": [{"company": "A 公司"}]},
+            target_role="后端工程师",
+            history=history,
+        )
+
+        user_payload = captured["messages"][1]["content"]
+        # 用户原话作为唯一素材传给模型，供逐句核对出处
+        assert "负责订单系统的性能优化，QPS 从 500 提升到 3000" in user_payload
+        # 助手侧的示例句不得参与，避免被当成用户提供的事实
+        assert "可以这样写" not in user_payload
+        assert captured["messages"][0]["content"] == ResumeAgent.RESUME_SYSTEM_PROMPT
+
+
+class TestResumeSummary:
+    """summary 必须是纯文本，剥离 Markdown 标记。"""
+
+    MARKDOWN_CONTENT = (
+        "# 张三\n\n"
+        "**目标岗位：AI 应用开发工程师** ｜ 工作年限：5 年\n\n"
+        "---\n\n"
+        "## 工作经历\n\n"
+        "### A 公司 · 后端工程师（2019-2023）\n\n"
+        "- 负责订单系统的性能优化，QPS 从 500 提升到 3000\n"
+        "- 使用 [Redis](https://redis.io) 做缓存\n\n"
+        "> 引用\n\n"
+        "`code`\n"
+    )
+
+    def test_summary_has_no_markdown_markers(self) -> None:
+        summary = ResumeRepository._build_summary(self.MARKDOWN_CONTENT)
+        for marker in ("#", "**", "---", "`", ">", "[", "]", "("):
+            assert marker not in summary, marker
+        # 列表符号已剥离，正文内容保留
+        assert not summary.startswith("- ")
+        assert "张三" in summary
+        assert "QPS 从 500 提升到 3000" in summary
+        assert "Redis" in summary
+
+    def test_summary_is_single_line_and_bounded(self) -> None:
+        summary = ResumeRepository._build_summary("# 姓名\n" + "内容 " * 200)
+        assert "\n" not in summary
+        assert len(summary) <= 160
+
+    def test_summary_of_empty_content_is_empty(self) -> None:
+        assert ResumeRepository._build_summary("") == ""
+        assert ResumeRepository._build_summary("   \n  ") == ""
+
+    def test_summary_survives_whole_content_fenced(self) -> None:
+        # 模型偶尔整体用 ``` 包裹正文，摘要不能被清空，只需剥掉围栏标记
+        fenced = (
+            "```markdown\n"
+            "# 张三\n\n"
+            "**目标岗位：后端工程师** ｜ 5 年经验\n"
+            "- QPS 从 500 提升到 3000\n"
+            "```"
+        )
+        summary = ResumeRepository._build_summary(fenced)
+        assert summary
+        for marker in ("#", "**", "```", "- "):
+            assert marker not in summary
+        assert "张三" in summary
+        assert "QPS 从 500 提升到 3000" in summary

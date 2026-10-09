@@ -123,26 +123,36 @@ echo "$SKIP"
 echo "    新 stage = $(jget "$SKIP" .stage)"
 
 echo
-echo "--- B3. 说「够了，帮我生成吧」直接进入 finalize ---"
-DONE=$(post "$API/$DRAFT_B/answer" "$(body answer "够了，帮我生成吧")")
-echo "$DONE"
-echo "    status=$(jget "$DONE" .status)  ready_to_finalize=$(jget "$DONE" .ready_to_finalize)"
+echo "--- B3. 分节未齐时说「够了，帮我生成吧」→ 只提示未完成分节，不置 COMPLETED ---"
+PENDING=$(post "$API/$DRAFT_B/answer" "$(body answer "够了，帮我生成吧")")
+echo "$PENDING"
+echo "    status=$(jget "$PENDING" .status)（应为 IN_PROGRESS）  ready_to_finalize=$(jget "$PENDING" .ready_to_finalize)（应为 False）"
+echo "    progress.completed=$(jget "$PENDING" .progress.completed)（不得 6 节全绿）"
 
 echo
-echo "--- B4. 直接 finalize ---"
+echo "--- B4. 对剩余分节逐一「没有」跳过后，草稿才置 COMPLETED ---"
+for _ in 1 2 3 4 5 6; do
+  RESP=$(post "$API/$DRAFT_B/answer" "$(body answer "没有")")
+  STAGE=$(jget "$RESP" .stage)
+  echo "    -> stage=$STAGE  status=$(jget "$RESP" .status)"
+  if [ "$STAGE" = "DONE" ]; then break; fi
+done
+
+echo
+echo "--- B5. 完成收集后生成并保存简历 ---"
 post "$API/$DRAFT_B/finalize" '{}'
 echo
 
 echo
-echo "--- B5. 不存在的 draft 应返回 404 + 中文 detail ---"
+echo "--- B6. 不存在的 draft 应返回 404 + 中文 detail ---"
 curl -sS -o /dev/null -w "HTTP %{http_code}\n" "$API/not-a-real-draft"
 
 echo
-echo "--- B6. 空白回答应返回 400 + 中文 detail ---"
+echo "--- B7. 空白回答应返回 400 + 中文 detail ---"
 curl -sS -X POST "$API/$DRAFT_B/answer" -H 'Content-Type: application/json' -d "$(body answer '   ')"
 
 echo
-echo "--- B7. 空回答（空字符串）应返回 400 + 中文 detail ---"
+echo "--- B8. 空回答（空字符串）应返回 400 + 中文 detail ---"
 curl -sS -X POST "$API/$DRAFT_B/answer" -H 'Content-Type: application/json' -d '{"answer": ""}'
 
 echo
