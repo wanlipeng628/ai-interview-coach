@@ -6,6 +6,7 @@ import AbilityProfilePage from '@/views/profile/AbilityProfilePage.vue'
 import InterviewHistoryPage from '@/views/history/InterviewHistoryPage.vue'
 import InterviewReportPage from '@/views/report/InterviewReportPage.vue'
 import ResumeProfilePage from '@/views/resume/ResumeProfilePage.vue'
+import ResumeAssistantPage from '@/views/resume/ResumeAssistantPage.vue'
 import MockInterviewPreparePage from '@/views/mock-interview/MockInterviewPreparePage.vue'
 import MockInterviewRoomPage from '@/views/mock-interview/MockInterviewRoomPage.vue'
 import TrainingPage from '@/views/training/TrainingPage.vue'
@@ -30,6 +31,12 @@ const router = createRouter({
           name: 'ResumeProfile',
           component: ResumeProfilePage,
           meta: { title: '我的简历' },
+        },
+        {
+          path: 'resume-assistant',
+          name: 'ResumeAssistant',
+          component: ResumeAssistantPage,
+          meta: { title: '简历助手' },
         },
         {
           path: 'mock-interview',

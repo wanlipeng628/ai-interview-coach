@@ -1,0 +1,1 @@
+"""Resume assistant domain model."""
