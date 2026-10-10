@@ -130,6 +130,7 @@ const menus: MenuItem[] = [
   { label: '能力画像', path: '/ability-profile', icon: DataAnalysis },
   { label: '专项训练', path: '/training', icon: Notebook },
   { label: '面试历史', path: '/interview-history', icon: Clock },
+  { label: '我的简历', path: '/resume', activePath: '/resume', icon: User },
 ]
 
 // 底部 TabBar 的 4 个页面入口，第 5 格固定为「更多」
@@ -144,7 +145,7 @@ const tabbarMenus: (MenuItem & { icon: Component })[] = [
 const drawerMenus: (MenuItem & { icon: Component })[] = [
   { label: '专项训练', path: '/training', icon: TrendCharts },
   { label: '面试历史', path: '/interview-history', icon: Clock },
-  { label: '个人信息', path: '/resume', icon: User },
+  { label: '我的简历', path: '/resume', icon: User },
 ]
 
 const moreVisible = ref(false)
