@@ -27,6 +27,7 @@ dist/
 build/
 .vite/
 *.tsbuildinfo
+*.tgz
 
 logs/
 *.log
