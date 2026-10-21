@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
 from app.application.resume.resume_assistant_dto import (
@@ -761,5 +761,5 @@ class ResumeAssistantService:
             "role": role,
             "content": content,
             "stage": stage,
-            "create_time": datetime.now(UTC).isoformat(),
+            "create_time": datetime.now().isoformat(),
         }

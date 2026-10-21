@@ -54,8 +54,10 @@ const isMobile = useMediaQuery('(max-width: 768px)')
 const expanded = ref(false)
 
 const formattedDuration = computed(() => {
-  const minutes = Math.floor(props.info.durationSeconds / 60)
-  const seconds = props.info.durationSeconds % 60
+  // 兜底：负数与 NaN 一律当 0，避免出现 "-449:-56" 这类串
+  const total = Math.max(0, Math.floor(props.info.durationSeconds) || 0)
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 })
 </script>

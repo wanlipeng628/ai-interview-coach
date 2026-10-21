@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import Depends
 from sqlalchemy import select
@@ -176,7 +176,7 @@ class TrainingRepository:
         if session is None:
             raise ValueError("Training session not found")
         session.status = "DONE"
-        session.ended_at = datetime.now(UTC).replace(tzinfo=None)
+        session.ended_at = datetime.now()
         self.update_status(user_id, session.task_id, "DONE", commit=False)
         self.db.commit()
         return session

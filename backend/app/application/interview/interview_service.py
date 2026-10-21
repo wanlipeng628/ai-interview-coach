@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 import logging
 import re
 import threading
@@ -449,9 +449,14 @@ class InterviewService:
         )
 
     def _elapsed_minutes(self, started_at: datetime) -> int:
-        now = datetime.now(UTC)
-        if started_at.tzinfo is None:
-            started_at = started_at.replace(tzinfo=UTC)
+        """计算已用分钟数。
+
+        全站时间统一为本地时间（naive）：带时区的值先转成本地再去掉 offset，
+        避免历史数据里混入 aware 值时报 "can't subtract offset-naive and offset-aware"。
+        """
+        now = datetime.now()
+        if started_at.tzinfo is not None:
+            started_at = started_at.astimezone().replace(tzinfo=None)
         return max(0, int((now - started_at).total_seconds() // 60))
 
     def _extract_resume_text(self, history: list[dict[str, str]]) -> str | None:

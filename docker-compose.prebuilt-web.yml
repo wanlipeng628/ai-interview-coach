@@ -40,6 +40,9 @@ services:
     environment:
       APP_ENV: prod
       APP_DEBUG: "false"
+      # 与 db 服务保持一致：全站时间统一用本地时间（naive）
+      # 容器默认是 UTC，不设的话 datetime.now() 会比 DB 的 now() 差 8 小时
+      TZ: Asia/Shanghai
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
       POSTGRES_USER: ${POSTGRES_USER}

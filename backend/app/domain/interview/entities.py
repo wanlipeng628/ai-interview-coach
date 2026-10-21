@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 
 
@@ -27,7 +27,9 @@ class InterviewSession:
     interviewer_mode: str | None = None
     is_deleted: bool = False
     is_valid: bool = True
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    # 全站时间统一用服务器本地时间（naive），不存 UTC：
+    # 数据库 create_time 的 server_default=now() 也是本地，两边一致才不会差 8 小时。
+    created_at: datetime = field(default_factory=datetime.now)
 
     @classmethod
     def create(

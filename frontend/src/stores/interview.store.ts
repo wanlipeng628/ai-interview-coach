@@ -186,7 +186,10 @@ export const useInterviewStore = defineStore('interview', {
 
     tickDuration() {
       if (this.info.status === 'finished') return
-      this.info.durationSeconds = Math.floor((Date.now() - this.info.startedAt) / 1000)
+      // clamp 到 0：时间源有偏差时（比如服务端与设备时区不一致）
+      // 宁可显示 00:00 也不要让负数直接流到界面上
+      const elapsed = Math.floor((Date.now() - this.info.startedAt) / 1000)
+      this.info.durationSeconds = Math.max(0, elapsed)
     },
 
     async submitAnswer(answer: string) {

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import Depends
 from sqlalchemy import case, func, select
@@ -119,7 +119,7 @@ class SqlAlchemyInterviewRepository:
             raise ValueError("Interview session not found")
 
         interview.status = InterviewSessionStatus.FINISHED.value
-        interview.ended_at = datetime.now(UTC).replace(tzinfo=None)
+        interview.ended_at = datetime.now()
         self.db.commit()
 
     def soft_delete(self, user_id: int, session_id: str) -> None:
@@ -332,7 +332,7 @@ class SqlAlchemyInterviewRepository:
             interviewer_mode=model.interviewer_mode,
             is_deleted=model.is_deleted,
             is_valid=model.is_valid,
-            created_at=model.create_time.replace(tzinfo=UTC),
+            created_at=model.create_time,
         )
 
 
