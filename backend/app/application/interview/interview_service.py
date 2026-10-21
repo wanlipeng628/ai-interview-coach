@@ -119,7 +119,12 @@ class InterviewService:
         )
 
         elapsed_minutes = self._elapsed_minutes(session.created_at)
-        if elapsed_minutes >= session.duration_minutes:
+
+        # 时长上限只当节奏参考，不当硬闸门：问没问完由面试官自己判断。
+        # 到点后仍可以继续追问，直到它认为材料够了、可以给出结论为止（decision=end）。
+        # 这里只留一个兜底：极端情况下（模型一直不收尾）不会无限追问下去。
+        hard_cap_minutes = session.duration_minutes * 2
+        if elapsed_minutes >= hard_cap_minutes:
             self._repository.finish(user_id, session_id)
             self._schedule_backfill_reviews(user_id, session_id)
             return SubmitAnswerResponse(
@@ -128,7 +133,7 @@ class InterviewService:
                 next_question=None,
                 is_finished=True,
                 decision="end",
-                reason="Reached maximum interview duration",
+                reason="Reached hard duration cap",
             )
 
         next_round = round_no + 1

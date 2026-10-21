@@ -27,7 +27,10 @@
       </div>
       <div>
         <span class="info-list__label">面试时长</span>
-        <strong>{{ formattedDuration }} / {{ info.durationLimitMinutes }} 分钟</strong>
+        <strong :class="{ 'is-overtime': isOvertime }">
+          {{ formattedDuration }} / {{ info.durationLimitMinutes }} 分钟
+        </strong>
+        <span v-if="isOvertime" class="overtime">已超出 {{ overtimeText }}</span>
       </div>
       <div>
         <span class="info-list__label">面试状态</span>
@@ -60,6 +63,18 @@ const formattedDuration = computed(() => {
   const seconds = total % 60
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 })
+
+// 超时不结束面试：时长只是节奏参考，收尾由面试官自己判断。
+// 这里只负责把超出的量说清楚。
+const overtimeSeconds = computed(() =>
+  Math.max(0, Math.floor(props.info.durationSeconds) - props.info.durationLimitMinutes * 60),
+)
+const isOvertime = computed(() => overtimeSeconds.value > 0)
+const overtimeText = computed(() => {
+  const minutes = Math.floor(overtimeSeconds.value / 60)
+  const seconds = overtimeSeconds.value % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+})
 </script>
 
 <style scoped lang="scss">
@@ -89,6 +104,16 @@ const formattedDuration = computed(() => {
   strong {
     color: var(--c-text-primary);
     font-size: var(--fs-xl);
+
+    &.is-overtime {
+      color: var(--c-warning-text);
+    }
+  }
+
+  .overtime {
+    color: var(--c-warning-text);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
   }
 }
 

@@ -48,7 +48,9 @@ class InterviewerAgent:
 8. 如果候选人年限较高，增加架构设计、分布式、稳定性、技术选型、复杂度权衡；AI 方向深入到 Agent 架构、评测体系与工程化落地。
 9. 如果回答有价值，优先基于回答中最关键的一个点继续追问。
 10. 如果候选人明显答不上来、含糊、重复、明确说不会，就切换到新方向，不要反复追打同一知识点。
-11. 信息已经足够，或接近面试时长上限时，可以结束面试。
+11. 结束时机由你判断：当关键能力点已经问到、你有足够信息给出结论时，才结束面试。
+12. 面试时长是节奏参考，不是硬性截止。快到或已经超过上限但仍有明显没问到的关键点时，继续问；超时后每轮都要重新判断「现在收尾能不能给出结论」，能就结束，不能就接着问。
+13. 不要为了赶时间提前结束，也不要因为超时就仓促收尾。
 
 难度控制：
 1. 从简历、自我介绍和项目描述中推断候选人大致工作年限。
@@ -98,6 +100,10 @@ class InterviewerAgent:
         history: list[dict[str, str]],
     ) -> InterviewerDecision:
         latest_answer = self._latest_candidate_answer(history)
+        if elapsed_minutes >= duration_minutes:
+            pacing = f"已超时长上限约 {elapsed_minutes - duration_minutes} 分钟：材料够了就收尾，不够就继续问"
+        else:
+            pacing = f"距时长上限还有约 {duration_minutes - elapsed_minutes} 分钟"
         messages = [
             {"role": "system", "content": self.SYSTEM_PROMPT},
             {
@@ -108,7 +114,7 @@ class InterviewerAgent:
                     f"面试方向：{direction or 'FULL_MOCK'}\n"
                     f"面试官模式：{interviewer_mode or 'NORMAL'}\n"
                     f"面试时长上限：{duration_minutes} 分钟\n"
-                    f"已进行时间：约 {elapsed_minutes} 分钟\n"
+                    f"已进行时间：约 {elapsed_minutes} 分钟（{pacing}）\n"
                     f"候选人简历：\n{resume_text or '未提供简历'}\n\n"
                     "历史问答：\n"
                     f"{self._format_history(history)}\n\n"
