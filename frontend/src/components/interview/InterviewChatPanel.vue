@@ -32,21 +32,28 @@ watch(
 <style scoped lang="scss">
 @use '../../assets/styles/responsive' as *;
 
+// 对话区不再是一个独立色块：房间底色由页面承担，这里只负责节奏。
 .chat-panel {
+  flex: 1 1 auto;
   min-height: 0;
   display: grid;
   align-content: start;
-  gap: 18px;
+  gap: 16px;
   overflow-y: auto;
-  padding: 20px;
-  border-radius: var(--r-md);
-  background: var(--c-bg-tint);
+  padding: 6px 20px 18px;
+
+  // 桌面端内容列居中并限宽，避免宽屏下每行拉得太长
+  > * {
+    width: 100%;
+    max-width: 760px;
+    justify-self: center;
+  }
 }
 
 @include mobile {
   .chat-panel {
-    gap: 12px;
-    padding: 12px;
+    gap: 14px;
+    padding: 4px 14px 14px;
   }
 }
 </style>

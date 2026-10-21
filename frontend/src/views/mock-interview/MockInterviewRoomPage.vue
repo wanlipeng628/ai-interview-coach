@@ -130,15 +130,39 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.left-pane,
-.center-pane {
+.left-pane {
   min-height: 0;
 }
 
+// 房间本体：一块暖白面，页头 / 对话 / 输入栏都长在它上面，不再各自成为一张卡
 .center-pane {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
-  gap: 16px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px 16px;
+  background: var(--c-chat-bg);
+  border-radius: 22px;
+  overflow: hidden;
+}
+
+// 工具栏页头在房间里退成一条低调的状态条
+.center-pane :deep(.page-header--toolbar) {
+  padding: 18px 4px 4px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.center-pane :deep(.page-header__actions .el-tag) {
+  --el-tag-bg-color: transparent;
+  --el-tag-border-color: var(--c-chat-line);
+  --el-tag-text-color: var(--c-chat-quiet);
+}
+
+.center-pane :deep(.el-alert) {
+  margin: 0 4px;
+  border-radius: var(--r-bubble);
 }
 
 @media (max-width: 1280px) {
@@ -166,21 +190,49 @@ onBeforeUnmount(() => {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 10px;
-    padding-bottom: calc(10px + #{$safe-bottom});
-    background: var(--c-bg-page);
+    gap: 0;
+    padding: 0;
+    padding-top: env(safe-area-inset-top, 0px);
+    background: var(--c-chat-bg);
     overflow: hidden;
   }
 
   .left-pane {
     flex: 0 0 auto;
+    padding: 8px 14px 0;
+  }
+
+  // 房间信息在手机上不再是卡片，只留一行轻量状态
+  .left-pane :deep(.el-card) {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+  }
+
+  .left-pane :deep(.el-card__header) {
+    padding: 0;
+    border-bottom: none;
+  }
+
+  .left-pane :deep(.el-card__body) {
+    padding: 0;
+  }
+
+  // 折叠开关在房间里退成次要文字，不抢第—眼
+  .left-pane :deep(.info-panel__toggle) {
+    color: var(--c-chat-quiet);
   }
 
   .center-pane {
     flex: 1;
-    gap: 10px;
     min-height: 0;
+    gap: 6px;
+    padding: 0 0 calc(10px + #{$safe-bottom});
+    border-radius: 0;
+  }
+
+  .center-pane :deep(.page-header--toolbar) {
+    padding: 8px 6px 2px;
   }
 
   .room-header__back {

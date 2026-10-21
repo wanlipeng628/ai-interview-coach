@@ -1,12 +1,10 @@
 <template>
   <div class="message" :class="`message--${message.role}`">
-    <el-avatar :size="36">{{ message.role === 'ai' ? 'AI' : '我' }}</el-avatar>
     <div class="bubble">
-      <div class="bubble__meta">
-        <strong>{{ message.role === 'ai' ? 'AI 面试官' : '候选人' }}</strong>
-        <span v-if="message.questionNo">Q{{ message.questionNo }}</span>
-      </div>
-      <p>{{ message.content }}<i v-if="message.streaming" class="cursor" /></p>
+      <span v-if="message.questionNo && message.role === 'ai'" class="bubble__q">
+        Q{{ message.questionNo }}
+      </span>
+      <p class="bubble__text">{{ message.content }}<i v-if="message.streaming" class="cursor" /></p>
     </div>
   </div>
 </template>
@@ -22,45 +20,53 @@ defineProps<{
 <style scoped lang="scss">
 @use '../../assets/styles/responsive' as *;
 
+// 房间里的对话规则：不挂头像、不标角色。
+// 谁在说话由「位置 + 底色」表达——左侧浅卡是面试官，右侧深色气泡是候选人。
 .message {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  justify-content: flex-start;
 
   &--user {
-    flex-direction: row-reverse;
-
-    .bubble {
-      color: var(--c-text-inverse);
-      background: var(--c-primary-500);
-    }
-
-    .bubble__meta {
-      color: rgba(255, 255, 255, 0.82);
-    }
+    justify-content: flex-end;
   }
 }
 
 .bubble {
-  max-width: min(680px, 78%);
-  padding: 14px 16px;
-  border-radius: var(--r-md);
-  color: var(--c-text-primary);
-  background: var(--c-bg-card);
-  box-shadow: var(--sh-sm);
+  max-width: min(660px, 90%);
+  padding: 16px 18px;
+  border-radius: var(--r-bubble);
+  background: var(--c-chat-surface);
+  box-shadow: var(--sh-chat);
 
-  &__meta {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 8px;
-    color: var(--c-text-tertiary);
-    font-size: 12px;
+  &__q {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--c-chat-quiet);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    letter-spacing: 0.06em;
   }
 
-  p {
+  &__text {
     margin: 0;
+    color: var(--c-text-primary);
+    font-size: 16px;
+    line-height: 1.72;
     white-space: pre-wrap;
-    line-height: 1.7;
+    overflow-wrap: anywhere;
+  }
+}
+
+.message--user .bubble {
+  max-width: min(560px, 78%);
+  padding: 13px 16px;
+  background: var(--c-chat-ink);
+  box-shadow: none;
+
+  .bubble__text {
+    color: var(--c-text-inverse);
+    font-size: 15px;
+    line-height: 1.66;
   }
 }
 
@@ -81,22 +87,19 @@ defineProps<{
 }
 
 @include mobile {
-  .message {
-    gap: 8px;
-    min-width: 0;
+  .bubble {
+    max-width: 88%;
+    padding: 14px 16px;
+
+    &__text {
+      font-size: 15px;
+      line-height: 1.7;
+    }
   }
 
-  .bubble {
+  .message--user .bubble {
     max-width: 84%;
-    min-width: 0;
-    padding: 11px 13px;
-    line-height: 1.6;
-
-    // 长 URL / 长类名这类不可断行的 token 会把 min-content 撑大，
-    // 而消息行同属一个 grid track，一条长 token 会把所有气泡一起撑宽
-    p {
-      overflow-wrap: anywhere;
-    }
+    padding: 11px 14px;
   }
 }
 </style>
