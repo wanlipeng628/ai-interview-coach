@@ -3,12 +3,12 @@
 set -euo pipefail
 
 cd /opt/ai-coach
-echo "== 当前提交 =="
-git log --oneline -1
+echo "== 部署版本（REVISION）=="
+cat REVISION 2>/dev/null || echo "未记录（旧部署）"
 
 echo
 echo "== 容器 =="
-docker compose ps --format 'table {{.Service}}\t{{.Status}}'
+docker compose ps
 
 echo
 echo "== 首页资源 =="
