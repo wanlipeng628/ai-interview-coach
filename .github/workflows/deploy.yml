@@ -56,7 +56,11 @@ jobs:
 
       - name: 发布后端
         if: ${{ inputs.target != 'web' }}
-        run: ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" backend
+        run: |
+          # 服务器到 GitHub 的连通性不稳定，源码由这里传过去，不在服务器上 git pull
+          printf '%s\n' "$GITHUB_SHA" > REVISION
+          tar -czf - backend REVISION \
+            | ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" backend
 
       - name: 发布后自检
         run: ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" verify

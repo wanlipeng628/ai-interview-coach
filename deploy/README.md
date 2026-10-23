@@ -31,7 +31,64 @@ Redis 未部署（代码里为预留，未接入业务）。
 
 ---
 
-## 二、日常发布：只改了前端
+## 二、日常发布：GitHub Actions 一键部署（推荐）
+
+仓库里有一套手动触发的流水线：`.github/workflows/deploy.yml`。
+在 GitHub 的 **Actions → Deploy → Run workflow** 选目标后点一下即可。
+
+| 目标 | 做了什么 |
+|---|---|
+| `web` | Actions 构建前端 → 打包通过 stdin 传到服务器 → 备份旧产物 → 替换 → 重启 web → 校验首页 |
+| `backend` | Actions 把源码传过去 → 覆盖 `backend/` → 重建镜像 → 重建容器 → 健康检查 |
+| `all` | 上面两个都跑 |
+
+跑完统一执行 `verify`，失败会在 Actions 里标红。
+
+### 为什么不让服务器自己 git pull
+
+实测这台服务器到 GitHub 的连通性不稳定（`git ls-remote` 会直接超时）。
+所以后端部署改成由 Actions 把「正好那一个 commit 的源码」传过去，
+比 pull 更确定，也不要求服务器能访问 GitHub。
+
+### 部署入口是被锁死的
+
+服务器上 `~/.ssh/authorized_keys` 里有一把 `github-actions-deploy` 专用密钥，
+带 `command=` 强制命令和 `no-pty/no-port-forwarding` 等限制：
+它只能执行 `web` / `backend` / `verify` / `status` 四个动作，拿不到 shell。
+入口脚本是 `deploy/ci/deploy-gate.sh`，白名单就在里面。
+
+### 需要的 Secrets（仓库 Settings → Secrets and variables → Actions）
+
+| 名称 | 值 |
+|---|---|
+| `DEPLOY_HOST` | `123.207.50.98` |
+| `DEPLOY_USER` | `ubuntu` |
+| `DEPLOY_SSH_KEY` | 部署专用私钥全文（含 BEGIN/END 行） |
+
+### 服务端脚本
+
+| 文件 | 作用 |
+|---|---|
+| `deploy/ci/deploy-gate.sh` | 动作白名单入口 |
+| `deploy/ci/web.sh` | 收 tar → 备份 → 替换 dist 内容（保留目录）→ 重启 web |
+| `deploy/ci/backend.sh` | 收源码 tar → 覆盖 backend/（旧版留 `backend.prev`）→ 重建 |
+| `deploy/ci/verify.sh` | 首页 + 静态资源 + 健康检查 |
+| `deploy/ci/status.sh` | 当前提交、容器状态、首页资源 |
+
+手动执行同样动作：
+
+```bash
+tar -czf - -C frontend/dist . | ssh -i <deploy_key> ubuntu@123.207.50.98 web
+printf '%s\n' "$(git rev-parse HEAD)" > REVISION
+tar -czf - --exclude=.venv --exclude=__pycache__ backend REVISION | ssh -i <deploy_key> ubuntu@123.207.50.98 backend
+ssh -i <deploy_key> ubuntu@123.207.50.98 verify
+```
+
+---
+
+## 三、日常发布：手动（没有 Actions 时）
+
+### 只改了前端
 
 ```powershell
 # 1. 本地构建
@@ -67,7 +124,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://123.207.50.98/assets/index-XXXX.
 
 ---
 
-## 三、日常发布：改了后端
+## 四、日常发布：只改了后端
 
 ```bash
 cd /opt/ai-coach
@@ -81,7 +138,7 @@ free -h                        # 构建时顺手看一眼内存
 
 ---
 
-## 四、回滚
+## 五、回滚
 
 **前端**（备份目录留着就是为这一步）：
 
@@ -96,7 +153,7 @@ sudo docker compose restart web
 
 ---
 
-## 五、首次上线（换新机器才需要）
+## 六、首次上线（换新机器才需要）
 
 **1. 开通服务器**
 
@@ -164,7 +221,7 @@ sudo docker compose up -d
 
 ---
 
-## 六、运维命令
+## 七、运维命令
 
 ```bash
 sudo docker compose ps                    # 三个服务状态
@@ -179,7 +236,7 @@ sudo docker compose exec db psql -U interview -d interview_coach
 
 ---
 
-## 七、备份数据库
+## 八、备份数据库
 
 ```bash
 sudo docker compose exec db pg_dump -U interview interview_coach > backup_$(date +%F).sql
@@ -187,7 +244,7 @@ sudo docker compose exec db pg_dump -U interview interview_coach > backup_$(date
 
 ---
 
-## 八、已知差异（待整理）
+## 九、已知差异（待整理）
 
 1. **服务器上的 `/opt/ai-coach` 本身是一个 git 检出**，但停在 `90a9f3f`，且 `docker-compose.yml` 被就地改成了预构建版（工作区有未提交改动）。目前实际生效的是「scp 产物 + 本地改的 compose」，git 那条路只是顺带存在。
    建议后续二选一：要么彻底走 `git pull`（把 compose 变体也纳入仓库），要么彻底走 scp，避免两边打架。

@@ -28,6 +28,7 @@ build/
 .vite/
 *.tsbuildinfo
 *.tgz
+REVISION
 
 logs/
 *.log
