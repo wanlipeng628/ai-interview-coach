@@ -26,18 +26,14 @@
       </PageHeader>
 
       <InterviewChatPanel :messages="interview.messages" />
-      <el-alert
-        v-if="interview.errorMessage"
-        :title="interview.errorMessage"
-        type="error"
-        show-icon
-        :closable="false"
-      />
       <InterviewInputBar
         :disabled="interview.loading || interview.isStreaming || interview.info.status === 'finished'"
         :generating="interview.generating"
+        :error-message="interview.errorMessage"
+        :failed-draft="interview.failedDraft"
         @send="interview.submitAnswer"
         @finish="handleFinish"
+        @clear-error="interview.errorMessage = ''"
       />
     </main>
   </div>
@@ -158,11 +154,6 @@ onBeforeUnmount(() => {
   --el-tag-bg-color: transparent;
   --el-tag-border-color: var(--c-chat-line);
   --el-tag-text-color: var(--c-chat-quiet);
-}
-
-.center-pane :deep(.el-alert) {
-  margin: 0 4px;
-  border-radius: var(--r-bubble);
 }
 
 @media (max-width: 1280px) {

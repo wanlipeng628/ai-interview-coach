@@ -1,6 +1,19 @@
 <template>
   <footer class="composer">
+    <div v-if="errorMessage && !generating" class="composer__error" role="alert">
+      <el-icon class="composer__error-icon"><Warning /></el-icon>
+      <span class="composer__error-text">{{ errorMessage }}</span>
+      <button
+        type="button"
+        class="composer__error-close"
+        aria-label="关闭提示"
+        @click="$emit('clearError')"
+      >
+        <el-icon><Close /></el-icon>
+      </button>
+    </div>
     <el-input
+      ref="textareaRef"
       v-model="draft"
       class="composer__field"
       type="textarea"
@@ -12,7 +25,7 @@
     />
     <div class="composer__actions">
       <span class="composer__hint">
-        {{ generating ? 'AI 正在出下一题…' : '建议：背景 · 方案 · 结果 · 反思' }}
+        {{ hintText }}
       </span>
       <button type="button" class="composer__finish" :disabled="disabled" @click="$emit('finish')">
         结束面试
@@ -31,20 +44,77 @@
 </template>
 
 <script setup lang="ts">
-import { Promotion } from '@element-plus/icons-vue'
-import { ref } from 'vue'
+import { Close, Promotion, Warning } from '@element-plus/icons-vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
-defineProps<{
+const props = defineProps<{
   disabled: boolean
   generating: boolean
+  errorMessage: string
+  failedDraft: string
 }>()
 
 const emit = defineEmits<{
   send: [answer: string]
   finish: []
+  clearError: []
 }>()
 
 const draft = ref('')
+const textareaRef = ref<InstanceType<typeof import('element-plus')['ElInput']> | null>(null)
+const generatingElapsed = ref(0)
+let generatingTimer: ReturnType<typeof setInterval> | null = null
+
+const GENERATING_LONG_THRESHOLD = 8
+
+const hintText = computed(() => {
+  if (props.generating) {
+    return generatingElapsed.value >= GENERATING_LONG_THRESHOLD
+      ? '还在生成，服务繁忙时会自动重试…'
+      : 'AI 正在出下一题…'
+  }
+  if (props.errorMessage) {
+    return '上次提交失败，回答已保留，可重新发送'
+  }
+  return '建议：背景 · 方案 · 结果 · 反思'
+})
+
+watch(
+  () => props.failedDraft,
+  (value) => {
+    if (value) {
+      draft.value = value
+      nextTick(() => {
+        textareaRef.value?.focus()
+      })
+    }
+  },
+)
+
+watch(
+  () => props.generating,
+  (isGenerating) => {
+    if (isGenerating) {
+      generatingElapsed.value = 0
+      generatingTimer = setInterval(() => {
+        generatingElapsed.value += 1
+      }, 1000)
+    } else {
+      if (generatingTimer) {
+        clearInterval(generatingTimer)
+        generatingTimer = null
+      }
+      generatingElapsed.value = 0
+    }
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  if (generatingTimer) {
+    clearInterval(generatingTimer)
+  }
+})
 
 const handleSend = () => {
   const answer = draft.value.trim()
@@ -57,7 +127,6 @@ const handleSend = () => {
 <style scoped lang="scss">
 @use '../../assets/styles/responsive' as *;
 
-// 悬浮输入区：房间底部的一块软白胶囊，输入框本身不画边框，只有整块承载阴影
 .composer {
   display: grid;
   gap: 4px;
@@ -66,6 +135,51 @@ const handleSend = () => {
   border-radius: var(--r-pill);
   background: var(--c-chat-surface);
   box-shadow: var(--sh-chat);
+
+  &__error {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    color: var(--c-warning-text);
+    font-size: 12px;
+    line-height: 1.4;
+    background: var(--c-warning-light);
+    border-radius: var(--r-sm);
+
+    &-icon {
+      flex: none;
+      font-size: 14px;
+    }
+
+    &-text {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    &-close {
+      flex: none;
+      display: grid;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      border: none;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--c-warning-text);
+      font-size: 12px;
+      cursor: pointer;
+      opacity: 0.7;
+      transition: opacity 0.15s ease;
+
+      &:hover {
+        opacity: 1;
+      }
+    }
+  }
 
   &__field :deep(.el-textarea__inner) {
     min-height: 46px;
@@ -93,6 +207,9 @@ const handleSend = () => {
     color: var(--c-chat-quiet);
     font-size: 12px;
     line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   &__finish {
@@ -117,7 +234,6 @@ const handleSend = () => {
     }
   }
 
-  // 深色圆形发送键：房间里唯一的实心动作
   &__send {
     flex: none;
     display: grid;
@@ -149,6 +265,10 @@ const handleSend = () => {
   .composer {
     margin: 0 10px;
     padding: 8px 10px 8px 16px;
+
+    &__error {
+      font-size: 11px;
+    }
 
     &__field :deep(.el-textarea__inner) {
       min-height: 40px;

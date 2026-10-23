@@ -5,7 +5,7 @@ import threading
 import time
 from uuid import uuid4
 
-from openai import RateLimitError
+from openai import APIConnectionError, APITimeoutError, RateLimitError
 
 from app.application.interview.interview_dto import (
     LatestActiveInterviewResponse,
@@ -110,13 +110,6 @@ class InterviewService:
         if not answer:
             raise ValueError("Answer cannot be empty")
         round_no = session.current_round
-        self._repository.append_message(
-            user_id=user_id,
-            session_id=session_id,
-            role="USER_CANDIDATE",
-            content=answer,
-            round_no=round_no,
-        )
 
         elapsed_minutes = self._elapsed_minutes(session.created_at)
 
@@ -125,6 +118,15 @@ class InterviewService:
         # 这里只留一个兜底：极端情况下（模型一直不收尾）不会无限追问下去。
         hard_cap_minutes = session.duration_minutes * 2
         if elapsed_minutes >= hard_cap_minutes:
+            # 到达硬上限：先把本轮回答落库，再结束面试。
+            # 这样后台复盘任务能看到这一轮回答，数据是完整的。
+            self._repository.append_message(
+                user_id=user_id,
+                session_id=session_id,
+                role="USER_CANDIDATE",
+                content=answer,
+                round_no=round_no,
+            )
             self._repository.finish(user_id, session_id)
             self._schedule_backfill_reviews(user_id, session_id)
             return SubmitAnswerResponse(
@@ -138,18 +140,40 @@ class InterviewService:
 
         next_round = round_no + 1
         history = self._repository.list_messages(user_id, session_id)
+        # 把用户回答拼到内存里的 history，传给 LLM 当上下文。
+        # 不先写入 DB：如果 LLM 失败（限流、超时、连接错误等），
+        # 就不会留下"有用户回答但没有下一题"的半成品状态。
+        # 失败回滚比事后删除更可靠——不用担心事务边界、并发写入等问题。
+        history_with_answer = history + [
+            {
+                "role": "USER_CANDIDATE",
+                "round_no": str(round_no),
+                "content": answer,
+            }
+        ]
+
         interviewer_agent = self._interviewer_agent or InterviewerAgent()
-        decision = interviewer_agent.generate_next_question(
+        decision = self._generate_next_question_with_retry(
+            interviewer_agent,
             job_role=session.job_role,
             round_no=next_round,
             duration_minutes=session.duration_minutes,
             elapsed_minutes=elapsed_minutes,
             direction=session.direction,
             interviewer_mode=session.interviewer_mode,
-            resume_text=self._extract_resume_text(history),
-            history=history,
+            resume_text=self._extract_resume_text(history_with_answer),
+            history=history_with_answer,
         )
+
         if decision.decision == "end":
+            # 面试官决定结束：用户回答也要落库，保证复盘时有完整记录。
+            self._repository.append_message(
+                user_id=user_id,
+                session_id=session_id,
+                role="USER_CANDIDATE",
+                content=answer,
+                round_no=round_no,
+            )
             self._repository.finish(user_id, session_id)
             self._schedule_backfill_reviews(user_id, session_id)
             return SubmitAnswerResponse(
@@ -164,19 +188,32 @@ class InterviewService:
         next_question = decision.question
         if not next_question:
             raise RuntimeError("LLM did not return next question")
-        if self._is_repeated_question(next_question, history):
+        if self._is_repeated_question(next_question, history_with_answer):
             regenerated_question = interviewer_agent.regenerate_question_avoiding_history(
                 job_role=session.job_role,
                 direction=session.direction,
                 interviewer_mode=session.interviewer_mode,
                 duplicated_question=next_question,
-                history=history,
+                history=history_with_answer,
             )
-            if regenerated_question and not self._is_repeated_question(regenerated_question, history):
+            if regenerated_question and not self._is_repeated_question(
+                regenerated_question, history_with_answer
+            ):
                 next_question = regenerated_question
             else:
-                next_question = self._build_non_repeated_question(session.direction, history)
+                next_question = self._build_non_repeated_question(
+                    session.direction, history_with_answer
+                )
 
+        # LLM 成功了才把用户回答和下一题一起落库。
+        # 消息顺序与之前一致：先用户回答，再下一题。
+        self._repository.append_message(
+            user_id=user_id,
+            session_id=session_id,
+            role="USER_CANDIDATE",
+            content=answer,
+            round_no=round_no,
+        )
         self._repository.append_message(
             user_id=user_id,
             session_id=session_id,
@@ -307,6 +344,62 @@ class InterviewService:
                         wait,
                     )
                     time.sleep(wait)
+        if last_error is not None:
+            raise last_error
+
+    def _generate_next_question_with_retry(
+        self,
+        agent: InterviewerAgent,
+        *,
+        job_role: str,
+        round_no: int,
+        duration_minutes: int,
+        elapsed_minutes: int,
+        direction: str | None,
+        interviewer_mode: str | None,
+        resume_text: str | None,
+        history: list[dict[str, str]],
+    ):
+        """Generate next question with backoff retry on recoverable LLM errors.
+
+        只对可恢复错误重试：限流、超时、连接问题。其它异常（解析失败、业务错误等）直接抛出。
+        退避 3s / 10s：3s 用来覆盖常见的短时限流抖动，10s 给 TPM/RPM 限流
+        留出足够的窗口恢复（多数服务商按分钟/秒级窗口计数，10s 后大概率能过）。
+        最多重试 2 次（共 3 次尝试），再多用户会明显感到卡顿。
+        """
+        # 与 _generate_reviews_with_retry 各自独立参数，不复用。
+        # 复盘是后台任务，可以等更久；实时提问是同步请求，等待时长要保守。
+        max_attempts = 3
+        backoff_seconds = [3.0, 10.0]
+        last_error: Exception | None = None
+        logger = logging.getLogger(__name__)
+
+        for attempt in range(max_attempts):
+            try:
+                return agent.generate_next_question(
+                    job_role=job_role,
+                    round_no=round_no,
+                    duration_minutes=duration_minutes,
+                    elapsed_minutes=elapsed_minutes,
+                    direction=direction,
+                    interviewer_mode=interviewer_mode,
+                    resume_text=resume_text,
+                    history=history,
+                )
+            except (RateLimitError, APITimeoutError, APIConnectionError) as exc:
+                last_error = exc
+                if attempt < max_attempts - 1:
+                    wait = backoff_seconds[attempt]
+                    logger.warning(
+                        "LLM call failed (attempt %s/%s), retrying in %.0fs: %s: %s",
+                        attempt + 1,
+                        max_attempts,
+                        wait,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    time.sleep(wait)
+        # 三次都失败，原样抛出最后一次异常，由路由层转 502。
         if last_error is not None:
             raise last_error
 

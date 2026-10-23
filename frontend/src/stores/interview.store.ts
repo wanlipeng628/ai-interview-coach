@@ -27,6 +27,7 @@ interface InterviewState {
   loading: boolean
   generating: boolean
   errorMessage: string
+  failedDraft: string
 }
 
 interface StartInterviewOptions {
@@ -70,6 +71,7 @@ export const useInterviewStore = defineStore('interview', {
     loading: false,
     generating: false,
     errorMessage: '',
+    failedDraft: '',
   }),
 
   getters: {
@@ -218,6 +220,7 @@ export const useInterviewStore = defineStore('interview', {
       this.loading = true
       this.generating = true
       this.errorMessage = ''
+      this.failedDraft = ''
       try {
         const response = await submitAnswerApi(this.info.sessionId, { answer: text })
 
@@ -232,6 +235,7 @@ export const useInterviewStore = defineStore('interview', {
         this.messages = this.messages.filter((item) => item.id !== userMessage.id)
         this.answeredQuestions = this.answeredQuestions.filter((item) => item !== answeredQuestion)
         this.errorMessage = getRequestErrorMessage(error)
+        this.failedDraft = text
         throw error
       } finally {
         this.loading = false
