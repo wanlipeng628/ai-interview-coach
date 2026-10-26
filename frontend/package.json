@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
-    "test": "node --test tests/unit.test.ts"
+    "test": "node --test tests/unit.test.ts tests/sse.test.ts tests/stream.test.ts tests/store.test.ts"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
