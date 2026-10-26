@@ -52,6 +52,8 @@ const props = defineProps<{
   generating: boolean
   errorMessage: string
   failedDraft: string
+  /** 流式 stage 事件给出的等待提示 */
+  stageLabel?: string
 }>()
 
 const emit = defineEmits<{
@@ -69,9 +71,11 @@ const GENERATING_LONG_THRESHOLD = 8
 
 const hintText = computed(() => {
   if (props.generating) {
-    return generatingElapsed.value >= GENERATING_LONG_THRESHOLD
-      ? '还在生成，服务繁忙时会自动重试…'
-      : 'AI 正在出下一题…'
+    // 阶段文案来自后端 stage 事件；超过 8 秒仍没结果就用慢提示兜底
+    if (generatingElapsed.value >= GENERATING_LONG_THRESHOLD) {
+      return '还在生成，服务繁忙时会自动重试…'
+    }
+    return props.stageLabel || 'AI 正在出下一题…'
   }
   if (props.errorMessage) {
     return '上次提交失败，回答已保留，可重新发送'
