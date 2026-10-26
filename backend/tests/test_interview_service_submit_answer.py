@@ -400,3 +400,45 @@ def test_stream_retry_stops_once_delta_emitted() -> None:
     with pytest.raises(RateLimitError):
         next(gen)
     assert agent.generate_next_question_stream.call_count == 1
+
+
+# === SSE 帧完整性：裸文本不能漏进流 ===
+
+def _stream_two_deltas_then_done(**kwargs):
+    yield {"type": "delta", "text": "那你"}
+    yield {"type": "delta", "text": "怎么做的？"}
+    yield {
+        "type": "done",
+        "decision": InterviewerDecision(decision="continue", question="那你怎么做的？", reason="继续"),
+    }
+
+
+def test_stream_output_is_properly_framed() -> None:
+    """每个非空行必须是 event: 或 data: 开头的 SSE 帧。
+
+    这条守住一个真实踩过的坑：内层生成器 yield 的是裸文本，用 yield from 会把它
+    直接漏进 HTTP 流，前端收到的就是「题目文本 + event: done」混在一起的东西。
+    """
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_session()
+    repo.list_messages.return_value = []
+
+    agent = MagicMock()
+    agent.generate_next_question_stream.side_effect = _stream_two_deltas_then_done
+
+    service = InterviewService(repository=repo, interviewer_agent=agent)
+    events = list(
+        service.submit_answer_stream(1, "test-session", SubmitAnswerRequest(answer="我的回答"))
+    )
+    payload = "".join(events)
+
+    for line in payload.split("\n"):
+        if not line.strip():
+            continue
+        assert line.startswith("event: ") or line.startswith("data: "), (
+            f"裸文本漏进了 SSE 流: {line!r}"
+        )
+
+    assert payload.count("event: delta") == 2
+    assert "event: done" in payload
+    assert "event: stage" in payload

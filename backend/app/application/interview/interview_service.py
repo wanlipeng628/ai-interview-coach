@@ -310,7 +310,9 @@ class InterviewService:
         yield self._sse_event("stage", {"stage": "generating", "label": "正在生成问题"})
 
         try:
-            decision = yield from self._generate_next_question_stream_with_retry(
+            # 注意：这里不能用 yield from——内层生成器 yield 的是裸文本，
+            # yield from 会把它直接漏进 HTTP 流，丢掉 SSE 帧。必须手动取、手动包。
+            stream_gen = self._generate_next_question_stream_with_retry(
                 interviewer_agent,
                 job_role=session.job_role,
                 round_no=next_round,
@@ -321,6 +323,14 @@ class InterviewService:
                 resume_text=self._extract_resume_text(history_with_answer),
                 history=history_with_answer,
             )
+            decision = None
+            while True:
+                try:
+                    delta_text = next(stream_gen)
+                except StopIteration as stop:
+                    decision = stop.value
+                    break
+                yield self._sse_event("delta", {"text": delta_text})
         except (RateLimitError, APITimeoutError, APIConnectionError) as exc:
             # 所有重试都失败了：发 error 事件后关闭连接
             yield self._sse_event("error", {"detail": f"LLM provider error: {exc}"})
