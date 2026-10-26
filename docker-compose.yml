@@ -60,6 +60,8 @@ services:
       LLM_MODEL: ${LLM_MODEL:-deepseek-v4-flash}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.7}
       LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-60}
+      # 出题链路 thinking 模式：disabled（默认，加速出题）/ enabled
+      LLM_QUESTION_THINKING: ${LLM_QUESTION_THINKING:-disabled}
     depends_on:
       db:
         condition: service_healthy

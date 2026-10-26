@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     llm_model: str = "SenseChat-5"
     llm_temperature: float = 0.7
     llm_timeout_seconds: int = 60
+    # 只控制出题链路的 thinking 模式（enabled / disabled），复盘链路始终开启思考
+    llm_question_thinking: str = "disabled"
     agentscope_project: str = "interview-coach"
 
     @computed_field

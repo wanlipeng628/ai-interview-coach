@@ -1,10 +1,11 @@
-from collections.abc import Iterator
-from dataclasses import dataclass, field
 import json
 import re
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.infrastructure.llm.openai_compatible_client import OpenAICompatibleClient
+from app.shared.config import settings
 
 
 @dataclass(slots=True)
@@ -124,7 +125,10 @@ class InterviewerAgent:
                 ),
             },
         ]
-        content = self._llm_client.chat(messages)
+        content = self._llm_client.chat(
+            messages,
+            thinking_mode=settings.llm_question_thinking,
+        )
         return self._parse_decision(content, latest_answer=latest_answer)
 
     def generate_next_question_stream(
@@ -175,7 +179,10 @@ class InterviewerAgent:
         full_content_parts: list[str] = []
         extractor = _JsonStringFieldExtractor("question")
 
-        for chunk in self._llm_client.chat_stream(messages):
+        for chunk in self._llm_client.chat_stream(
+            messages,
+            thinking_mode=settings.llm_question_thinking,
+        ):
             full_content_parts.append(chunk)
             delta_text = extractor.feed(chunk)
             if delta_text:
@@ -218,7 +225,10 @@ class InterviewerAgent:
                 ),
             },
         ]
-        content = self._llm_client.chat(messages)
+        content = self._llm_client.chat(
+            messages,
+            thinking_mode=settings.llm_question_thinking,
+        )
         try:
             payload = json.loads(self._extract_json(content))
         except json.JSONDecodeError:
