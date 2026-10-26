@@ -1,6 +1,6 @@
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -90,6 +90,42 @@ class InterviewerAgent:
     def __init__(self, llm_client: OpenAICompatibleClient | None = None) -> None:
         self._llm_client = llm_client or OpenAICompatibleClient()
 
+    def _build_next_question_messages(
+        self,
+        job_role: str,
+        round_no: int,
+        duration_minutes: int,
+        elapsed_minutes: int,
+        direction: str | None,
+        interviewer_mode: str | None,
+        resume_text: str | None,
+        history: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        """同步与异步出题链路共用的 prompt，避免两份实现漂移。"""
+        if elapsed_minutes >= duration_minutes:
+            pacing = f"已超时长上限约 {elapsed_minutes - duration_minutes} 分钟：材料够了就收尾，不够就继续问"
+        else:
+            pacing = f"距时长上限还有约 {duration_minutes - elapsed_minutes} 分钟"
+        return [
+            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"面试岗位：{job_role}\n"
+                    f"当前准备生成的问题轮次：第 {round_no} 轮\n"
+                    f"面试方向：{direction or 'FULL_MOCK'}\n"
+                    f"面试官模式：{interviewer_mode or 'NORMAL'}\n"
+                    f"面试时长上限：{duration_minutes} 分钟\n"
+                    f"已进行时间：约 {elapsed_minutes} 分钟（{pacing}）\n"
+                    f"候选人简历：\n{resume_text or '未提供简历'}\n\n"
+                    "历史问答：\n"
+                    f"{self._format_history(history)}\n\n"
+                    "请基于候选人最近一轮回答，先在心里评估回答质量，再输出下一步决策。\n"
+                    "再次强调：question 只能是下一个单一面试问题，不能包含任何评价或指导。"
+                ),
+            },
+        ]
+
     def generate_next_question(
         self,
         job_role: str,
@@ -102,36 +138,23 @@ class InterviewerAgent:
         history: list[dict[str, str]],
     ) -> InterviewerDecision:
         latest_answer = self._latest_candidate_answer(history)
-        if elapsed_minutes >= duration_minutes:
-            pacing = f"已超时长上限约 {elapsed_minutes - duration_minutes} 分钟：材料够了就收尾，不够就继续问"
-        else:
-            pacing = f"距时长上限还有约 {duration_minutes - elapsed_minutes} 分钟"
-        messages = [
-            {"role": "system", "content": self.SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"面试岗位：{job_role}\n"
-                    f"当前准备生成的问题轮次：第 {round_no} 轮\n"
-                    f"面试方向：{direction or 'FULL_MOCK'}\n"
-                    f"面试官模式：{interviewer_mode or 'NORMAL'}\n"
-                    f"面试时长上限：{duration_minutes} 分钟\n"
-                    f"已进行时间：约 {elapsed_minutes} 分钟（{pacing}）\n"
-                    f"候选人简历：\n{resume_text or '未提供简历'}\n\n"
-                    "历史问答：\n"
-                    f"{self._format_history(history)}\n\n"
-                    "请基于候选人最近一轮回答，先在心里评估回答质量，再输出下一步决策。\n"
-                    "再次强调：question 只能是下一个单一面试问题，不能包含任何评价或指导。"
-                ),
-            },
-        ]
+        messages = self._build_next_question_messages(
+            job_role=job_role,
+            round_no=round_no,
+            duration_minutes=duration_minutes,
+            elapsed_minutes=elapsed_minutes,
+            direction=direction,
+            interviewer_mode=interviewer_mode,
+            resume_text=resume_text,
+            history=history,
+        )
         content = self._llm_client.chat(
             messages,
             thinking_mode=settings.llm_question_thinking,
         )
         return self._parse_decision(content, latest_answer=latest_answer)
 
-    def generate_next_question_stream(
+    async def agenerate_next_question_stream(
         self,
         job_role: str,
         round_no: int,
@@ -141,7 +164,7 @@ class InterviewerAgent:
         interviewer_mode: str | None,
         resume_text: str | None,
         history: list[dict[str, str]],
-    ) -> Iterator[dict]:
+    ) -> AsyncIterator[dict]:
         """Streaming version of generate_next_question.
 
         Yields dicts with keys:
@@ -152,34 +175,21 @@ class InterviewerAgent:
         Other fields (decision, reason) never leak into the delta stream.
         """
         latest_answer = self._latest_candidate_answer(history)
-        if elapsed_minutes >= duration_minutes:
-            pacing = f"已超时长上限约 {elapsed_minutes - duration_minutes} 分钟：材料够了就收尾，不够就继续问"
-        else:
-            pacing = f"距时长上限还有约 {duration_minutes - elapsed_minutes} 分钟"
-        messages = [
-            {"role": "system", "content": self.SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"面试岗位：{job_role}\n"
-                    f"当前准备生成的问题轮次：第 {round_no} 轮\n"
-                    f"面试方向：{direction or 'FULL_MOCK'}\n"
-                    f"面试官模式：{interviewer_mode or 'NORMAL'}\n"
-                    f"面试时长上限：{duration_minutes} 分钟\n"
-                    f"已进行时间：约 {elapsed_minutes} 分钟（{pacing}）\n"
-                    f"候选人简历：\n{resume_text or '未提供简历'}\n\n"
-                    "历史问答：\n"
-                    f"{self._format_history(history)}\n\n"
-                    "请基于候选人最近一轮回答，先在心里评估回答质量，再输出下一步决策。\n"
-                    "再次强调：question 只能是下一个单一面试问题，不能包含任何评价或指导。"
-                ),
-            },
-        ]
+        messages = self._build_next_question_messages(
+            job_role=job_role,
+            round_no=round_no,
+            duration_minutes=duration_minutes,
+            elapsed_minutes=elapsed_minutes,
+            direction=direction,
+            interviewer_mode=interviewer_mode,
+            resume_text=resume_text,
+            history=history,
+        )
 
         full_content_parts: list[str] = []
         extractor = _JsonStringFieldExtractor("question")
 
-        for chunk in self._llm_client.chat_stream(
+        async for chunk in self._llm_client.achat_stream(
             messages,
             thinking_mode=settings.llm_question_thinking,
         ):

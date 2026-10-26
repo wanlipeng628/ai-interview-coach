@@ -1,19 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from openai import OpenAIError
 
 from app.application.interview.interview_dto import (
-    LatestActiveInterviewResponse,
+    FinishInterviewResponse,
     InterviewHistoryItemResponse,
     InterviewMessageResponse,
     InterviewReviewResponse,
     InterviewSessionResponse,
-    FinishInterviewResponse,
-    SuccessResponse,
-    SubmitAnswerRequest,
-    SubmitAnswerResponse,
+    LatestActiveInterviewResponse,
     StartInterviewRequest,
     StartInterviewResponse,
+    SubmitAnswerRequest,
+    SubmitAnswerResponse,
+    SuccessResponse,
     UpdateInterviewValidityRequest,
 )
 from app.application.interview.interview_service import InterviewService
@@ -143,6 +143,7 @@ async def submit_answer(
 async def submit_answer_stream(
     session_id: str,
     request: SubmitAnswerRequest,
+    http_request: Request,
     user_id: int = Depends(get_current_user_id),
     service: InterviewService = Depends(get_interview_service),
 ) -> StreamingResponse:
@@ -152,7 +153,12 @@ async def submit_answer_stream(
     On failure after headers are sent: error event then close.
     """
     try:
-        event_stream = service.submit_answer_stream(user_id, session_id, request)
+        event_stream = await service.submit_answer_stream(
+            user_id,
+            session_id,
+            request,
+            is_disconnected=http_request.is_disconnected,
+        )
     except ValueError as exc:
         message = str(exc)
         if "not found" in message.lower():

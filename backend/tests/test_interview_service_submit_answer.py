@@ -5,6 +5,7 @@
 2. LLM 失败时不留半成品：数据库里不会出现"有用户回答但没有下一题"的状态。
 """
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -370,7 +371,7 @@ def test_generate_reviews_with_retry_is_unchanged() -> None:
 
 # === 流式重试：吐过内容就不再重试 ===
 
-def _stream_delta_then_rate_limit(**kwargs):
+async def _stream_delta_then_rate_limit(**kwargs):
     yield {"type": "delta", "text": "那你"}
     raise RateLimitError(message="rate limited", response=MagicMock(), body={})
 
@@ -382,29 +383,34 @@ def test_stream_retry_stops_once_delta_emitted() -> None:
     """
     service = InterviewService(repository=MagicMock())
     agent = MagicMock()
-    agent.generate_next_question_stream.side_effect = _stream_delta_then_rate_limit
+    agent.agenerate_next_question_stream.side_effect = _stream_delta_then_rate_limit
 
-    gen = service._generate_next_question_stream_with_retry(
-        agent,
-        job_role="Java开发工程师",
-        round_no=2,
-        duration_minutes=45,
-        elapsed_minutes=5,
-        direction=None,
-        interviewer_mode=None,
-        resume_text=None,
-        history=[],
-    )
+    async def consume() -> tuple[list[tuple[str, object]], RateLimitError]:
+        gen = service._agenerate_next_question_stream_with_retry(
+            agent,
+            job_role="Java开发工程师",
+            round_no=2,
+            duration_minutes=45,
+            elapsed_minutes=5,
+            direction=None,
+            interviewer_mode=None,
+            resume_text=None,
+            history=[],
+        )
+        events = [await anext(gen)]
+        with pytest.raises(RateLimitError) as raised:
+            await anext(gen)
+        return events, raised.value
 
-    assert next(gen) == "那你"
-    with pytest.raises(RateLimitError):
-        next(gen)
-    assert agent.generate_next_question_stream.call_count == 1
+    events, _ = asyncio.run(consume())
+
+    assert events == [("delta", "那你")]
+    assert agent.agenerate_next_question_stream.call_count == 1
 
 
 # === SSE 帧完整性：裸文本不能漏进流 ===
 
-def _stream_two_deltas_then_done(**kwargs):
+async def _stream_two_deltas_then_done(**kwargs):
     yield {"type": "delta", "text": "那你"}
     yield {"type": "delta", "text": "怎么做的？"}
     yield {
@@ -424,12 +430,17 @@ def test_stream_output_is_properly_framed() -> None:
     repo.list_messages.return_value = []
 
     agent = MagicMock()
-    agent.generate_next_question_stream.side_effect = _stream_two_deltas_then_done
+    agent.agenerate_next_question_stream.side_effect = _stream_two_deltas_then_done
 
     service = InterviewService(repository=repo, interviewer_agent=agent)
-    events = list(
-        service.submit_answer_stream(1, "test-session", SubmitAnswerRequest(answer="我的回答"))
-    )
+
+    async def collect() -> list[str]:
+        gen = await service.submit_answer_stream(
+            1, "test-session", SubmitAnswerRequest(answer="我的回答")
+        )
+        return [chunk async for chunk in gen]
+
+    events = asyncio.run(collect())
     payload = "".join(events)
 
     for line in payload.split("\n"):

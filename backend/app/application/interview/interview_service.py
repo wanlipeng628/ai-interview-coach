@@ -1,35 +1,41 @@
-from collections.abc import Generator
-from datetime import datetime
+import asyncio
+import functools
 import json
 import logging
-import queue
 import re
 import threading
 import time
+from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import datetime
+from typing import TypeVar
 from uuid import uuid4
 
+import anyio
 from openai import APIConnectionError, APITimeoutError, RateLimitError
 
 from app.application.interview.interview_dto import (
-    LatestActiveInterviewResponse,
+    FinishInterviewResponse,
     InterviewHistoryItemResponse,
     InterviewMessageResponse,
     InterviewReviewResponse,
     InterviewReviewRoundResponse,
     InterviewSessionResponse,
-    FinishInterviewResponse,
-    SuccessResponse,
-    SubmitAnswerRequest,
-    SubmitAnswerResponse,
+    LatestActiveInterviewResponse,
     StartInterviewRequest,
     StartInterviewResponse,
+    SubmitAnswerRequest,
+    SubmitAnswerResponse,
+    SuccessResponse,
     UpdateInterviewValidityRequest,
 )
-from app.domain.interview.entities import InterviewAnswerReview, InterviewSession
-from app.domain.interview.entities import InterviewSessionStatus
+from app.domain.interview.entities import (
+    InterviewAnswerReview,
+    InterviewSession,
+    InterviewSessionStatus,
+)
 from app.domain.interview.repositories import InterviewRepository
 from app.domain.interview.services import InterviewQuestionPolicy
-from app.infrastructure.agent.interview_agent import InterviewerAgent
+from app.infrastructure.agent.interview_agent import InterviewerAgent, InterviewerDecision
 
 RESUME_CONTEXT_PREFIX = "RESUME_CONTEXT"
 LEGACY_RESUME_PREFIXES = (
@@ -43,100 +49,12 @@ LEGACY_RESUME_PREFIXES = (
 # 对长时间无数据的连接会主动断开（阈值通常 30~60 秒）。
 SSE_HEARTBEAT_FRAME = ": keep-alive\n\n"
 SSE_HEARTBEAT_INTERVAL_SECONDS = 5.0
-# 客户端断开时收尾最多等这么久。线程都是 daemon，超时也不会阻塞进程退出。
-SSE_HEARTBEAT_JOIN_TIMEOUT_SECONDS = 2.0
 
-# 队列消息的三种类型：真实事件、心跳帧、流结束（携带内层生成器的返回值或异常）
-_SSE_EVENT = "event"
-_SSE_HEARTBEAT = "heartbeat"
-_SSE_STREAM_END = "end"
+_T = TypeVar("_T")
 
 
-class _SseHeartbeatFrame(str):
-    """心跳帧标记。
-
-    值就是注释帧文本，用类型和真实 delta 区分——否则外层会把心跳
-    当成 delta 包进 `event: delta`，前端就会把注释帧当题目显示出来。
-    """
-
-
-def _sse_heartbeat_wrapper(
-    inner: Generator[str, None, object],
-    interval_seconds: float = SSE_HEARTBEAT_INTERVAL_SECONDS,
-) -> Generator[str, None, object]:
-    """在第一个真实事件到达前，每隔 interval_seconds 插一条 SSE 注释帧。
-
-    内部生成器跑在后台线程里，产出的事件经 queue 转交给外层生成器；
-    心跳线程在第一个真实事件到达前持续往队列塞注释帧，第一个真实事件
-    一到就停。内层生成器的返回值（StopIteration.value）和异常都原样转交。
-
-    客户端断开时 StreamingResponse 会关闭外层生成器，此时 finally 里
-    置停两个 Event 并 join 两个线程，避免每次断连漏一对线程。
-    """
-    output: queue.Queue[tuple[str, object]] = queue.Queue()
-    # 第一个真实事件到达（或内层已结束）后置位，心跳线程据此退出
-    stop_heartbeat = threading.Event()
-    # 外层生成器被关闭时置位，通知生产者线程收尾
-    stop_producer = threading.Event()
-
-    def produce() -> None:
-        outcome: tuple[str, object] | None = None
-        try:
-            iterator = iter(inner)
-            while not stop_producer.is_set():
-                try:
-                    item = next(iterator)
-                except StopIteration as stop:
-                    outcome = ("return", stop.value)
-                    break
-                stop_heartbeat.set()
-                output.put((_SSE_EVENT, item))
-        except BaseException as exc:  # noqa: BLE001 - 原样交给外层重新抛出
-            outcome = ("error", exc)
-        finally:
-            stop_heartbeat.set()
-            if stop_producer.is_set() and outcome is None:
-                # 客户端已断开：主动关掉内层生成器，尽快释放底层 HTTP 连接。
-                # close 失败不能挡住下面的结束哨兵，否则外层会一直等在队列上。
-                try:
-                    close = getattr(inner, "close", None)
-                    if close is not None:
-                        close()
-                except Exception:  # noqa: BLE001
-                    logging.getLogger(__name__).exception("关闭内层 SSE 生成器失败")
-            output.put((_SSE_STREAM_END, outcome))
-
-    def beat() -> None:
-        while not stop_heartbeat.wait(interval_seconds):
-            output.put((_SSE_HEARTBEAT, _SseHeartbeatFrame(SSE_HEARTBEAT_FRAME)))
-
-    producer_thread = threading.Thread(
-        target=produce, name="sse-heartbeat-producer", daemon=True
-    )
-    heartbeat_thread = threading.Thread(
-        target=beat, name="sse-heartbeat-ticker", daemon=True
-    )
-    producer_thread.start()
-    heartbeat_thread.start()
-
-    try:
-        while True:
-            kind, payload = output.get()
-            if kind == _SSE_STREAM_END:
-                break
-            yield payload  # type: ignore[misc]
-
-        if payload is not None:
-            outcome_kind, outcome_value = payload  # type: ignore[misc]
-            if outcome_kind == "error":
-                raise outcome_value  # type: ignore[misc]
-            return outcome_value
-        return None
-    finally:
-        stop_heartbeat.set()
-        stop_producer.set()
-        producer_thread.join(timeout=SSE_HEARTBEAT_JOIN_TIMEOUT_SECONDS)
-        heartbeat_thread.join(timeout=SSE_HEARTBEAT_JOIN_TIMEOUT_SECONDS)
+class _ClientDisconnected(Exception):
+    """客户端已断开，流式生成器应立即收尾，不再写库。"""
 
 
 class InterviewService:
@@ -335,20 +253,23 @@ class InterviewService:
             reason=decision.reason,
         )
 
-    def submit_answer_stream(
+    async def submit_answer_stream(
         self,
         user_id: int,
         session_id: str,
         request: SubmitAnswerRequest,
-    ) -> Generator[str, None, None]:
+        is_disconnected: Callable[[], Awaitable[bool]] | None = None,
+    ) -> AsyncIterator[str]:
         """Streaming version of submit_answer.
 
-        Returns a generator that yields SSE-formatted event strings.
+        Returns an async generator that yields SSE-formatted event strings.
         Validation (session not found, empty answer) happens before the
         first yield so the caller can return HTTP errors instead of SSE.
         """
         # 前置校验：与同步路径完全一致的校验逻辑
-        session = self._repository.get_by_id(user_id, session_id)
+        session = await self._run_blocking(
+            self._repository.get_by_id, user_id=user_id, session_id=session_id
+        )
         if session is None:
             raise ValueError("Interview session not found")
         if session.status != InterviewSessionStatus.IN_PROGRESS:
@@ -358,30 +279,40 @@ class InterviewService:
         if not answer:
             raise ValueError("Answer cannot be empty")
 
-        return self._submit_answer_stream_inner(session, user_id, session_id, answer)
+        return self._submit_answer_stream_inner(
+            session, user_id, session_id, answer, is_disconnected
+        )
 
-    def _submit_answer_stream_inner(
+    async def _submit_answer_stream_inner(
         self,
         session: InterviewSession,
         user_id: int,
         session_id: str,
         answer: str,
-    ) -> Generator[str, None, None]:
-        """Internal generator that yields SSE events for the answer stream."""
+        is_disconnected: Callable[[], Awaitable[bool]] | None = None,
+    ) -> AsyncIterator[str]:
+        """Internal async generator that yields SSE events for the answer stream.
+
+        全部 IO（DB、LLM）都是异步的，客户端断连时取消协程即可沿 await 点
+        一路收尾并关闭内层 LLM 流，不再依赖线程与队列。
+        """
         round_no = session.current_round
         elapsed_minutes = self._elapsed_minutes(session.created_at)
 
         # 硬上限兜底：与同步路径逻辑完全一致
         hard_cap_minutes = session.duration_minutes * 2
         if elapsed_minutes >= hard_cap_minutes:
-            self._repository.append_message(
+            await self._run_blocking(
+                self._repository.append_message,
                 user_id=user_id,
                 session_id=session_id,
                 role="USER_CANDIDATE",
                 content=answer,
                 round_no=round_no,
             )
-            self._repository.finish(user_id, session_id)
+            await self._run_blocking(
+                self._repository.finish, user_id=user_id, session_id=session_id
+            )
             self._schedule_backfill_reviews(user_id, session_id)
             final_response = SubmitAnswerResponse(
                 session_id=session_id,
@@ -395,7 +326,9 @@ class InterviewService:
             return
 
         next_round = round_no + 1
-        history = self._repository.list_messages(user_id, session_id)
+        history = await self._run_blocking(
+            self._repository.list_messages, user_id=user_id, session_id=session_id
+        )
         # 推迟落库：与同步路径一致，先在内存拼接 history
         history_with_answer = history + [
             {
@@ -410,37 +343,34 @@ class InterviewService:
         # 发送阶段提示
         yield self._sse_event("stage", {"stage": "generating", "label": "正在生成问题"})
 
-        # 注意：这里不能用 yield from——内层生成器 yield 的是裸文本，
-        # yield from 会把它直接漏进 HTTP 流，丢掉 SSE 帧。必须手动取、手动包。
-        # 心跳包在重试循环外层：重试期间还没吐出任何 delta，连接仍需保活；
-        # 第一个 delta 到达后心跳自动停止。
-        stream_gen = _sse_heartbeat_wrapper(
-            self._generate_next_question_stream_with_retry(
-                interviewer_agent,
-                job_role=session.job_role,
-                round_no=next_round,
-                duration_minutes=session.duration_minutes,
-                elapsed_minutes=elapsed_minutes,
-                direction=session.direction,
-                interviewer_mode=session.interviewer_mode,
-                resume_text=self._extract_resume_text(history_with_answer),
-                history=history_with_answer,
-            ),
-            SSE_HEARTBEAT_INTERVAL_SECONDS,
+        # 心跳由消费侧驱动：等待下一个 delta 超时就插一帧注释帧，
+        # 首个 delta 之后不再发。重试退避期同样还没吐出 delta，心跳继续。
+        inner_stream = self._agenerate_next_question_stream_with_retry(
+            interviewer_agent,
+            job_role=session.job_role,
+            round_no=next_round,
+            duration_minutes=session.duration_minutes,
+            elapsed_minutes=elapsed_minutes,
+            direction=session.direction,
+            interviewer_mode=session.interviewer_mode,
+            resume_text=self._extract_resume_text(history_with_answer),
+            history=history_with_answer,
         )
-        decision = None
+        decision: InterviewerDecision | None = None
+        heartbeat_stream = self._astream_with_heartbeat(inner_stream, is_disconnected)
         try:
-            while True:
-                try:
-                    delta_text = next(stream_gen)
-                except StopIteration as stop:
-                    decision = stop.value
+            async for kind, payload in heartbeat_stream:
+                if kind == "heartbeat":
+                    yield payload
+                elif kind == "delta":
+                    yield self._sse_event("delta", {"text": payload})
+                else:  # done：重试循环给出的最终决策
+                    decision = payload  # type: ignore[assignment]
                     break
-                if isinstance(delta_text, _SseHeartbeatFrame):
-                    # 心跳是完整的 SSE 帧，原样输出，不能包进 delta
-                    yield delta_text
-                    continue
-                yield self._sse_event("delta", {"text": delta_text})
+        except _ClientDisconnected:
+            # 客户端已断开：内层 LLM 流已由 _astream_with_heartbeat 关闭，
+            # 这里直接收尾，不落库、不再写 SSE。
+            return
         except (RateLimitError, APITimeoutError, APIConnectionError) as exc:
             # 所有重试都失败了：发 error 事件后关闭连接
             yield self._sse_event("error", {"detail": f"LLM provider error: {exc}"})
@@ -449,20 +379,24 @@ class InterviewService:
             yield self._sse_event("error", {"detail": str(exc)})
             return
         finally:
-            # 客户端断开时本生成器会被 close，这里负责把心跳线程收干净。
-            # 已正常结束或已抛异常的生成器 close() 是空操作。
-            stream_gen.close()
+            await heartbeat_stream.aclose()
+
+        if decision is None:
+            return
 
         if decision.decision == "end":
             # 面试官决定结束：用户回答落库，保证复盘数据完整
-            self._repository.append_message(
+            await self._run_blocking(
+                self._repository.append_message,
                 user_id=user_id,
                 session_id=session_id,
                 role="USER_CANDIDATE",
                 content=answer,
                 round_no=round_no,
             )
-            self._repository.finish(user_id, session_id)
+            await self._run_blocking(
+                self._repository.finish, user_id=user_id, session_id=session_id
+            )
             self._schedule_backfill_reviews(user_id, session_id)
             final_response = SubmitAnswerResponse(
                 session_id=session_id,
@@ -482,7 +416,8 @@ class InterviewService:
 
         # 重复题兜底：与同步路径一致的逻辑
         if self._is_repeated_question(next_question, history_with_answer):
-            regenerated_question = interviewer_agent.regenerate_question_avoiding_history(
+            regenerated_question = await self._run_blocking(
+                interviewer_agent.regenerate_question_avoiding_history,
                 job_role=session.job_role,
                 direction=session.direction,
                 interviewer_mode=session.interviewer_mode,
@@ -502,21 +437,28 @@ class InterviewService:
                 yield self._sse_event("delta", {"text": next_question})
 
         # LLM 成功后才落库：与同步路径一致的推迟落库策略
-        self._repository.append_message(
+        await self._run_blocking(
+            self._repository.append_message,
             user_id=user_id,
             session_id=session_id,
             role="USER_CANDIDATE",
             content=answer,
             round_no=round_no,
         )
-        self._repository.append_message(
+        await self._run_blocking(
+            self._repository.append_message,
             user_id=user_id,
             session_id=session_id,
             role="AI_INTERVIEWER",
             content=next_question,
             round_no=next_round,
         )
-        self._repository.advance_round(user_id, session_id, next_round)
+        await self._run_blocking(
+            self._repository.advance_round,
+            user_id=user_id,
+            session_id=session_id,
+            current_round=next_round,
+        )
 
         final_response = SubmitAnswerResponse(
             session_id=session_id,
@@ -528,7 +470,62 @@ class InterviewService:
         )
         yield self._sse_event("done", final_response.model_dump())
 
-    def _generate_next_question_stream_with_retry(
+    @staticmethod
+    async def _run_blocking(func: Callable[..., _T], /, **kwargs) -> _T:
+        """把同步阻塞调用（DB / LLM）挪到工作线程，避免阻塞事件循环。"""
+        return await anyio.to_thread.run_sync(functools.partial(func, **kwargs))
+
+    async def _astream_with_heartbeat(
+        self,
+        inner: AsyncIterator[tuple[str, object]],
+        is_disconnected: Callable[[], Awaitable[bool]] | None,
+    ) -> AsyncIterator[tuple[str, object]]:
+        """包装事件流：首 delta 前按心跳间隔产出注释帧。
+
+        yield ("delta", text) / ("heartbeat", frame) / ("done", decision)。
+        内层（重试循环）通过 ("done", decision) 把最终决策交出来。
+        """
+        pending: asyncio.Task[tuple[str, object]] | None = None
+        emitted = False
+        interval = SSE_HEARTBEAT_INTERVAL_SECONDS
+        # 断连探测不超过 0.5s，同时对 pending 只做一次 anext，不重新发起
+        poll_slice = min(interval, 0.5)
+        loop = asyncio.get_running_loop()
+        last_heartbeat_at = loop.time()
+
+        try:
+            while True:
+                if pending is None:
+                    # 不能直接 wait_for(anext(inner))：超时会取消 __anext__，
+                    # 把正在等 LLM 的异步生成器一起取消掉。用 task 保留在途请求。
+                    pending = asyncio.ensure_future(anext(inner))
+                done, _ = await asyncio.wait({pending}, timeout=poll_slice)
+                if pending in done:
+                    task, pending = pending, None
+                    try:
+                        event = task.result()
+                    except StopAsyncIteration:
+                        return
+                    if event[0] == "delta":
+                        emitted = True
+                    yield event
+                    continue
+
+                if is_disconnected is not None and await is_disconnected():
+                    raise _ClientDisconnected
+
+                now = loop.time()
+                if not emitted and now - last_heartbeat_at >= interval:
+                    last_heartbeat_at = now
+                    yield ("heartbeat", SSE_HEARTBEAT_FRAME)
+        finally:
+            # 正常结束、异常、断连、被取消都走这里：取消在途 anext，
+            # 取消会传入内层异步生成器，触发 achat_stream 的 finally 关闭 LLM 流。
+            if pending is not None:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+
+    async def _agenerate_next_question_stream_with_retry(
         self,
         agent: InterviewerAgent,
         *,
@@ -540,10 +537,10 @@ class InterviewService:
         interviewer_mode: str | None,
         resume_text: str | None,
         history: list[dict[str, str]],
-    ) -> Generator[str, None, object]:
+    ) -> AsyncIterator[tuple[str, object]]:
         """Streaming version of _generate_next_question_with_retry.
 
-        Yields delta text chunks. Returns the final InterviewerDecision.
+        yield ("delta", text) 流式片段，最后 yield ("done", InterviewerDecision)。
 
         只对连接阶段的可恢复错误重试（还没吐出任何内容时）。
         一旦开始吐出 delta，后续错误直接抛出（不能中途重试——前端已经看到部分内容了）。
@@ -558,7 +555,7 @@ class InterviewService:
             # 是否已经吐过内容：吐过就不能重试，否则前端会看到同一道题被重复拼一遍
             emitted = False
             try:
-                stream = agent.generate_next_question_stream(
+                stream = agent.agenerate_next_question_stream(
                     job_role=job_role,
                     round_no=round_no,
                     duration_minutes=duration_minutes,
@@ -568,12 +565,13 @@ class InterviewService:
                     resume_text=resume_text,
                     history=history,
                 )
-                for event in stream:
+                async for event in stream:
                     if event["type"] == "delta":
                         emitted = True
-                        yield event["text"]
+                        yield ("delta", event["text"])
                     elif event["type"] == "done":
-                        return event["decision"]
+                        yield ("done", event["decision"])
+                        return
                 # 流结束了却没有 done：不能静默当作成功
                 raise RuntimeError("LLM stream ended without done event")
             except (RateLimitError, APITimeoutError, APIConnectionError) as exc:
@@ -591,7 +589,7 @@ class InterviewService:
                         type(exc).__name__,
                         exc,
                     )
-                    time.sleep(wait)
+                    await asyncio.sleep(wait)
                 else:
                     raise
         # 不会走到这里，只是让类型检查满意
