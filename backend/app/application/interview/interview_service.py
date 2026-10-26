@@ -2,6 +2,7 @@ from collections.abc import Generator
 from datetime import datetime
 import json
 import logging
+import queue
 import re
 import threading
 import time
@@ -36,6 +37,106 @@ LEGACY_RESUME_PREFIXES = (
     "候选人简历:",
     "鍊欓€変汉绠€鍘嗭細",
 )
+
+# SSE 注释帧：以冒号开头，按 SSE 规范所有合规客户端都必须忽略。
+# 用途是首字节到达前的连接保活——nginx / 云负载均衡 / 运营商中间盒
+# 对长时间无数据的连接会主动断开（阈值通常 30~60 秒）。
+SSE_HEARTBEAT_FRAME = ": keep-alive\n\n"
+SSE_HEARTBEAT_INTERVAL_SECONDS = 5.0
+# 客户端断开时收尾最多等这么久。线程都是 daemon，超时也不会阻塞进程退出。
+SSE_HEARTBEAT_JOIN_TIMEOUT_SECONDS = 2.0
+
+# 队列消息的三种类型：真实事件、心跳帧、流结束（携带内层生成器的返回值或异常）
+_SSE_EVENT = "event"
+_SSE_HEARTBEAT = "heartbeat"
+_SSE_STREAM_END = "end"
+
+
+class _SseHeartbeatFrame(str):
+    """心跳帧标记。
+
+    值就是注释帧文本，用类型和真实 delta 区分——否则外层会把心跳
+    当成 delta 包进 `event: delta`，前端就会把注释帧当题目显示出来。
+    """
+
+
+def _sse_heartbeat_wrapper(
+    inner: Generator[str, None, object],
+    interval_seconds: float = SSE_HEARTBEAT_INTERVAL_SECONDS,
+) -> Generator[str, None, object]:
+    """在第一个真实事件到达前，每隔 interval_seconds 插一条 SSE 注释帧。
+
+    内部生成器跑在后台线程里，产出的事件经 queue 转交给外层生成器；
+    心跳线程在第一个真实事件到达前持续往队列塞注释帧，第一个真实事件
+    一到就停。内层生成器的返回值（StopIteration.value）和异常都原样转交。
+
+    客户端断开时 StreamingResponse 会关闭外层生成器，此时 finally 里
+    置停两个 Event 并 join 两个线程，避免每次断连漏一对线程。
+    """
+    output: queue.Queue[tuple[str, object]] = queue.Queue()
+    # 第一个真实事件到达（或内层已结束）后置位，心跳线程据此退出
+    stop_heartbeat = threading.Event()
+    # 外层生成器被关闭时置位，通知生产者线程收尾
+    stop_producer = threading.Event()
+
+    def produce() -> None:
+        outcome: tuple[str, object] | None = None
+        try:
+            iterator = iter(inner)
+            while not stop_producer.is_set():
+                try:
+                    item = next(iterator)
+                except StopIteration as stop:
+                    outcome = ("return", stop.value)
+                    break
+                stop_heartbeat.set()
+                output.put((_SSE_EVENT, item))
+        except BaseException as exc:  # noqa: BLE001 - 原样交给外层重新抛出
+            outcome = ("error", exc)
+        finally:
+            stop_heartbeat.set()
+            if stop_producer.is_set() and outcome is None:
+                # 客户端已断开：主动关掉内层生成器，尽快释放底层 HTTP 连接。
+                # close 失败不能挡住下面的结束哨兵，否则外层会一直等在队列上。
+                try:
+                    close = getattr(inner, "close", None)
+                    if close is not None:
+                        close()
+                except Exception:  # noqa: BLE001
+                    logging.getLogger(__name__).exception("关闭内层 SSE 生成器失败")
+            output.put((_SSE_STREAM_END, outcome))
+
+    def beat() -> None:
+        while not stop_heartbeat.wait(interval_seconds):
+            output.put((_SSE_HEARTBEAT, _SseHeartbeatFrame(SSE_HEARTBEAT_FRAME)))
+
+    producer_thread = threading.Thread(
+        target=produce, name="sse-heartbeat-producer", daemon=True
+    )
+    heartbeat_thread = threading.Thread(
+        target=beat, name="sse-heartbeat-ticker", daemon=True
+    )
+    producer_thread.start()
+    heartbeat_thread.start()
+
+    try:
+        while True:
+            kind, payload = output.get()
+            if kind == _SSE_STREAM_END:
+                break
+            yield payload  # type: ignore[misc]
+
+        if payload is not None:
+            outcome_kind, outcome_value = payload  # type: ignore[misc]
+            if outcome_kind == "error":
+                raise outcome_value  # type: ignore[misc]
+            return outcome_value
+        return None
+    finally:
+        stop_heartbeat.set()
+        stop_producer.set()
+        producer_thread.join(timeout=SSE_HEARTBEAT_JOIN_TIMEOUT_SECONDS)
+        heartbeat_thread.join(timeout=SSE_HEARTBEAT_JOIN_TIMEOUT_SECONDS)
 
 
 class InterviewService:
@@ -309,10 +410,12 @@ class InterviewService:
         # 发送阶段提示
         yield self._sse_event("stage", {"stage": "generating", "label": "正在生成问题"})
 
-        try:
-            # 注意：这里不能用 yield from——内层生成器 yield 的是裸文本，
-            # yield from 会把它直接漏进 HTTP 流，丢掉 SSE 帧。必须手动取、手动包。
-            stream_gen = self._generate_next_question_stream_with_retry(
+        # 注意：这里不能用 yield from——内层生成器 yield 的是裸文本，
+        # yield from 会把它直接漏进 HTTP 流，丢掉 SSE 帧。必须手动取、手动包。
+        # 心跳包在重试循环外层：重试期间还没吐出任何 delta，连接仍需保活；
+        # 第一个 delta 到达后心跳自动停止。
+        stream_gen = _sse_heartbeat_wrapper(
+            self._generate_next_question_stream_with_retry(
                 interviewer_agent,
                 job_role=session.job_role,
                 round_no=next_round,
@@ -322,14 +425,21 @@ class InterviewService:
                 interviewer_mode=session.interviewer_mode,
                 resume_text=self._extract_resume_text(history_with_answer),
                 history=history_with_answer,
-            )
-            decision = None
+            ),
+            SSE_HEARTBEAT_INTERVAL_SECONDS,
+        )
+        decision = None
+        try:
             while True:
                 try:
                     delta_text = next(stream_gen)
                 except StopIteration as stop:
                     decision = stop.value
                     break
+                if isinstance(delta_text, _SseHeartbeatFrame):
+                    # 心跳是完整的 SSE 帧，原样输出，不能包进 delta
+                    yield delta_text
+                    continue
                 yield self._sse_event("delta", {"text": delta_text})
         except (RateLimitError, APITimeoutError, APIConnectionError) as exc:
             # 所有重试都失败了：发 error 事件后关闭连接
@@ -338,6 +448,10 @@ class InterviewService:
         except Exception as exc:  # noqa: BLE001
             yield self._sse_event("error", {"detail": str(exc)})
             return
+        finally:
+            # 客户端断开时本生成器会被 close，这里负责把心跳线程收干净。
+            # 已正常结束或已抛异常的生成器 close() 是空操作。
+            stream_gen.close()
 
         if decision.decision == "end":
             # 面试官决定结束：用户回答落库，保证复盘数据完整

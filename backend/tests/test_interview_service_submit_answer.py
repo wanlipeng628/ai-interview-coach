@@ -435,9 +435,12 @@ def test_stream_output_is_properly_framed() -> None:
     for line in payload.split("\n"):
         if not line.strip():
             continue
-        assert line.startswith("event: ") or line.startswith("data: "), (
-            f"裸文本漏进了 SSE 流: {line!r}"
-        )
+        # 心跳注释帧（以冒号开头）也是合法 SSE，除此之外必须是事件帧
+        assert (
+            line.startswith("event: ")
+            or line.startswith("data: ")
+            or line.startswith(": ")
+        ), f"裸文本漏进了 SSE 流: {line!r}"
 
     assert payload.count("event: delta") == 2
     assert "event: done" in payload
