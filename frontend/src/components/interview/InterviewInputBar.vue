@@ -47,13 +47,15 @@
 import { Close, Promotion, Warning } from '@element-plus/icons-vue'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
+import { resolveInterviewHint } from '@/utils/interviewHint'
+
 const props = defineProps<{
   disabled: boolean
   generating: boolean
+  /** 面试官已经开始流式吐出题目文字（收到过第一个 delta） */
+  isStreaming: boolean
   errorMessage: string
   failedDraft: string
-  /** 流式 stage 事件给出的等待提示 */
-  stageLabel?: string
 }>()
 
 const emit = defineEmits<{
@@ -67,21 +69,15 @@ const textareaRef = ref<InstanceType<typeof import('element-plus')['ElInput']> |
 const generatingElapsed = ref(0)
 let generatingTimer: ReturnType<typeof setInterval> | null = null
 
-const GENERATING_LONG_THRESHOLD = 8
-
-const hintText = computed(() => {
-  if (props.generating) {
-    // 阶段文案来自后端 stage 事件；超过 8 秒仍没结果就用慢提示兜底
-    if (generatingElapsed.value >= GENERATING_LONG_THRESHOLD) {
-      return '还在生成，服务繁忙时会自动重试…'
-    }
-    return props.stageLabel || 'AI 正在出下一题…'
-  }
-  if (props.errorMessage) {
-    return '上次提交失败，回答已保留，可重新发送'
-  }
-  return '建议：背景 · 方案 · 结果 · 反思'
-})
+// 等待期文案由前端状态机管控（AIC-76 口径，见 utils/interviewHint.ts）：不再消费后端 stage 的 label
+const hintText = computed(() =>
+  resolveInterviewHint({
+    generating: props.generating,
+    isStreaming: props.isStreaming,
+    elapsedSeconds: generatingElapsed.value,
+    errorMessage: props.errorMessage,
+  }),
+)
 
 watch(
   () => props.failedDraft,

@@ -29,9 +29,9 @@
       <InterviewInputBar
         :disabled="interview.loading || interview.isStreaming || interview.info.status === 'finished'"
         :generating="interview.generating"
+        :is-streaming="interview.isStreaming"
         :error-message="interview.errorMessage"
         :failed-draft="interview.failedDraft"
-        :stage-label="interview.stageLabel"
         @send="interview.submitAnswer"
         @finish="handleFinish"
         @clear-error="interview.errorMessage = ''"
