@@ -1,7 +1,10 @@
 import axios from 'axios'
 
+// 流式接口走原生 fetch，没有 axios 的 baseURL，这里统一暴露前缀
+export const API_BASE_URL = '/api'
+
 const request = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE_URL,
   timeout: 120000,
   headers: {
     'Content-Type': 'application/json',

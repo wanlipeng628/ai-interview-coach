@@ -31,6 +31,7 @@
         :generating="interview.generating"
         :error-message="interview.errorMessage"
         :failed-draft="interview.failedDraft"
+        :stage-label="interview.stageLabel"
         @send="interview.submitAnswer"
         @finish="handleFinish"
         @clear-error="interview.errorMessage = ''"
@@ -111,6 +112,8 @@ onBeforeUnmount(() => {
   window.visualViewport?.removeEventListener('resize', syncViewportHeight)
   window.visualViewport?.removeEventListener('scroll', syncViewportHeight)
   if (durationTimer) window.clearInterval(durationTimer)
+  // 离开房间就别让 SSE 流挂着
+  interview.cancelStream()
 })
 </script>
 

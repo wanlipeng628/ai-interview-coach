@@ -7,6 +7,8 @@ import {
   listInterviewMessagesApi,
   startInterviewApi,
   submitAnswerApi,
+  submitAnswerStreamApi,
+  SubmitAnswerStreamError,
 } from '@/api/interview.api'
 import type {
   AnsweredQuestion,
@@ -15,6 +17,7 @@ import type {
   InterviewRole,
   LatestActiveInterview,
 } from '@/types/interview'
+import type { SubmitAnswerResponse } from '@/api/interview.api'
 
 import { uuid } from '@/utils/uuid'
 
@@ -28,7 +31,13 @@ interface InterviewState {
   generating: boolean
   errorMessage: string
   failedDraft: string
+  /** stage 事件给出的等待提示，空串表示还没收到 */
+  stageLabel: string
 }
+
+// 流式请求的控制句柄和 attempt 序号不进 state：它们不是渲染数据，也不该被 Pinia 代理
+let submitToken = 0
+let activeStream: AbortController | null = null
 
 interface StartInterviewOptions {
   jobRole?: string
@@ -72,6 +81,7 @@ export const useInterviewStore = defineStore('interview', {
     generating: false,
     errorMessage: '',
     failedDraft: '',
+    stageLabel: '',
   }),
 
   getters: {
@@ -135,6 +145,7 @@ export const useInterviewStore = defineStore('interview', {
         this.answeredQuestions = []
         this.isStreaming = false
         this.generating = false
+        this.stageLabel = ''
       } finally {
         this.loading = false
       }
@@ -181,6 +192,7 @@ export const useInterviewStore = defineStore('interview', {
           }))
         this.isStreaming = false
         this.generating = false
+        this.stageLabel = ''
       } finally {
         this.loading = false
       }
@@ -221,78 +233,154 @@ export const useInterviewStore = defineStore('interview', {
       this.generating = true
       this.errorMessage = ''
       this.failedDraft = ''
+      this.stageLabel = ''
+
+      const token = ++submitToken
+      const controller = new AbortController()
+      activeStream = controller
+      let streamedMessageId: string | null = null
+
+      // 结束后 / 已中断的 attempt 迟到的回调一律丢弃，避免往已收尾的会话里写消息
+      const isStale = () => token !== submitToken
+
       try {
-        const response = await submitAnswerApi(this.info.sessionId, { answer: text })
+        try {
+          await submitAnswerStreamApi(
+            this.info.sessionId,
+            { answer: text },
+            {
+              onStage: ({ label }) => {
+                if (!isStale()) this.stageLabel = label
+              },
+              onDelta: ({ text: delta }) => {
+                if (isStale() || !delta) return
+                if (!streamedMessageId) {
+                  streamedMessageId = uuid()
+                  this.messages.push({
+                    id: streamedMessageId,
+                    role: 'ai',
+                    content: '',
+                    createdAt: new Date().toISOString(),
+                    streaming: true,
+                  })
+                  this.isStreaming = true
+                }
+                const message = this.messages.find((item) => item.id === streamedMessageId)
+                if (message) message.content += delta
+              },
+              onDone: (response) => {
+                if (!isStale()) this.applyAnswerResponse(response, streamedMessageId)
+              },
+            },
+            controller.signal,
+          )
+          if (isStale()) return
+        } catch (streamError) {
+          if (isAbortError(streamError) || isStale()) return
 
-        if (response.is_finished || !response.next_question) {
-          this.markFinished()
-          return
+          // 流式不可用（后端没开 / 连接中断 / 流内 error）：丢掉半截气泡，回落同步接口重试一次
+          this.discardStreamedMessages()
+          streamedMessageId = null
+          this.isStreaming = false
+          this.stageLabel = ''
+
+          const response = await submitAnswerApi(this.info.sessionId, { answer: text })
+          if (isStale()) return
+          this.applyAnswerResponse(response, null)
         }
-
-        this.info.currentQuestionNo = response.round_no
-        this.streamNextQuestion(response.next_question)
       } catch (error) {
+        if (isAbortError(error) || isStale()) return
+
+        // AIC-71 的失败路径：回滚这条回答，把原文还回输入框，轻提示可重发
+        this.discardStreamedMessages()
         this.messages = this.messages.filter((item) => item.id !== userMessage.id)
         this.answeredQuestions = this.answeredQuestions.filter((item) => item !== answeredQuestion)
         this.errorMessage = getRequestErrorMessage(error)
         this.failedDraft = text
         throw error
       } finally {
-        this.loading = false
-        if (!this.isStreaming) {
-          this.generating = false
+        if (token === submitToken) {
+          this.loading = false
+          this.stageLabel = ''
+          if (!this.isStreaming) {
+            this.generating = false
+          }
+          if (activeStream === controller) activeStream = null
         }
       }
     },
 
-    streamNextQuestion(question: string) {
-      this.isStreaming = true
-      const messageId = uuid()
-      const message: InterviewMessage = {
-        id: messageId,
-        role: 'ai',
-        questionNo: this.info.currentQuestionNo,
-        content: '',
-        createdAt: new Date().toISOString(),
-        streaming: true,
+    /** 用 done / 同步返回体收尾：贴题号、判定是否结束 */
+    applyAnswerResponse(response: SubmitAnswerResponse, streamedMessageId: string | null) {
+      if (response.is_finished || !response.next_question) {
+        this.discardStreamedMessages()
+        this.markFinished()
+        return
       }
 
-      this.messages.push(message)
-      const messageIndex = this.messages.findIndex((item) => item.id === messageId)
+      const message = streamedMessageId
+        ? this.messages.find((item) => item.id === streamedMessageId)
+        : undefined
 
-      let index = 0
-      const timer = window.setInterval(() => {
-        const currentMessage = this.messages[messageIndex]
-        if (!currentMessage) {
-          window.clearInterval(timer)
-          this.isStreaming = false
-          this.generating = false
-          return
-        }
+      if (message) {
+        // delta 已经把题目逐字写出来了，这里只贴题号收尾；
+        // 万一服务端没发 delta，用完整题目兜底
+        if (!message.content.trim()) message.content = response.next_question
+        message.questionNo = response.round_no
+        message.streaming = false
+      } else {
+        this.messages.push({
+          id: uuid(),
+          role: 'ai',
+          questionNo: response.round_no,
+          content: response.next_question,
+          createdAt: new Date().toISOString(),
+        })
+      }
 
-        currentMessage.content += question[index] ?? ''
-        index += 1
+      this.info.currentQuestionNo = response.round_no
+      this.isStreaming = false
+      this.generating = false
+    },
 
-        if (index >= question.length) {
-          window.clearInterval(timer)
-          currentMessage.streaming = false
-          this.isStreaming = false
-          this.generating = false
-        }
-      }, 24)
+    /** 结束面试 / 离开房间时断开流，别让 SSE 一直挂着 */
+    cancelStream() {
+      submitToken += 1
+      activeStream?.abort()
+      activeStream = null
+
+      this.discardStreamedMessages()
+      this.isStreaming = false
+      this.generating = false
+      this.stageLabel = ''
+      this.loading = false
+    },
+
+    discardStreamedMessages() {
+      if (!this.messages.some((item) => item.streaming)) return
+      this.messages = this.messages.filter((item) => !item.streaming)
     },
 
     async finishInterview() {
-      if (this.info.status !== 'finished' && this.info.sessionId !== 'demo-session') {
-        await finishInterviewApi(this.info.sessionId)
+      this.cancelStream()
+      if (this.info.status === 'finished') return
+
+      this.loading = true
+      try {
+        if (this.info.sessionId !== 'demo-session') {
+          await finishInterviewApi(this.info.sessionId)
+        }
+        this.markFinished()
+      } finally {
+        this.loading = false
       }
-      this.markFinished()
     },
 
     markFinished() {
       this.info.status = 'finished'
       this.isStreaming = false
       this.generating = false
+      this.stageLabel = ''
       const alreadyHasFinishMessage = this.messages.some((item) => item.content === finishMessage)
       if (!alreadyHasFinishMessage) {
         this.messages.push({
@@ -306,7 +394,11 @@ export const useInterviewStore = defineStore('interview', {
   },
 })
 
+const isAbortError = (error: unknown) =>
+  typeof error === 'object' && error !== null && (error as { name?: string }).name === 'AbortError'
+
 const getRequestErrorMessage = (error: unknown) => {
+  if (error instanceof SubmitAnswerStreamError) return error.detail
   if (typeof error === 'object' && error !== null && 'response' in error) {
     const response = (error as { response?: { data?: { detail?: string } } }).response
     return response?.data?.detail ?? '提交回答失败，请稍后重试'
