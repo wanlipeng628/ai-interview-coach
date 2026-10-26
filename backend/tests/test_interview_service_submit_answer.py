@@ -366,3 +366,37 @@ def test_generate_reviews_with_retry_is_unchanged() -> None:
     sig = inspect.signature(service._generate_reviews_with_retry)
     assert sig.parameters["max_attempts"].default == 3
     assert sig.parameters["base_wait_seconds"].default == 15.0
+
+
+# === 流式重试：吐过内容就不再重试 ===
+
+def _stream_delta_then_rate_limit(**kwargs):
+    yield {"type": "delta", "text": "那你"}
+    raise RateLimitError(message="rate limited", response=MagicMock(), body={})
+
+
+def test_stream_retry_stops_once_delta_emitted() -> None:
+    """已经吐出 delta 之后再限流，不能重试。
+
+    重试会让前端把同一道题重新拼一遍，用户会看到「那你那你…」。
+    """
+    service = InterviewService(repository=MagicMock())
+    agent = MagicMock()
+    agent.generate_next_question_stream.side_effect = _stream_delta_then_rate_limit
+
+    gen = service._generate_next_question_stream_with_retry(
+        agent,
+        job_role="Java开发工程师",
+        round_no=2,
+        duration_minutes=45,
+        elapsed_minutes=5,
+        direction=None,
+        interviewer_mode=None,
+        resume_text=None,
+        history=[],
+    )
+
+    assert next(gen) == "那你"
+    with pytest.raises(RateLimitError):
+        next(gen)
+    assert agent.generate_next_question_stream.call_count == 1

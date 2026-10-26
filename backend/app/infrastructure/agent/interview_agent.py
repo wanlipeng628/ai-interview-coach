@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 import json
 import re
@@ -125,6 +126,64 @@ class InterviewerAgent:
         ]
         content = self._llm_client.chat(messages)
         return self._parse_decision(content, latest_answer=latest_answer)
+
+    def generate_next_question_stream(
+        self,
+        job_role: str,
+        round_no: int,
+        duration_minutes: int,
+        elapsed_minutes: int,
+        direction: str | None,
+        interviewer_mode: str | None,
+        resume_text: str | None,
+        history: list[dict[str, str]],
+    ) -> Iterator[dict]:
+        """Streaming version of generate_next_question.
+
+        Yields dicts with keys:
+          - {"type": "delta", "text": "..."}  — incremental question text chunks
+          - {"type": "done", "decision": InterviewerDecision}  — final result
+
+        Only the question field's decoded string value is emitted as delta.
+        Other fields (decision, reason) never leak into the delta stream.
+        """
+        latest_answer = self._latest_candidate_answer(history)
+        if elapsed_minutes >= duration_minutes:
+            pacing = f"已超时长上限约 {elapsed_minutes - duration_minutes} 分钟：材料够了就收尾，不够就继续问"
+        else:
+            pacing = f"距时长上限还有约 {duration_minutes - elapsed_minutes} 分钟"
+        messages = [
+            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"面试岗位：{job_role}\n"
+                    f"当前准备生成的问题轮次：第 {round_no} 轮\n"
+                    f"面试方向：{direction or 'FULL_MOCK'}\n"
+                    f"面试官模式：{interviewer_mode or 'NORMAL'}\n"
+                    f"面试时长上限：{duration_minutes} 分钟\n"
+                    f"已进行时间：约 {elapsed_minutes} 分钟（{pacing}）\n"
+                    f"候选人简历：\n{resume_text or '未提供简历'}\n\n"
+                    "历史问答：\n"
+                    f"{self._format_history(history)}\n\n"
+                    "请基于候选人最近一轮回答，先在心里评估回答质量，再输出下一步决策。\n"
+                    "再次强调：question 只能是下一个单一面试问题，不能包含任何评价或指导。"
+                ),
+            },
+        ]
+
+        full_content_parts: list[str] = []
+        extractor = _JsonStringFieldExtractor("question")
+
+        for chunk in self._llm_client.chat_stream(messages):
+            full_content_parts.append(chunk)
+            delta_text = extractor.feed(chunk)
+            if delta_text:
+                yield {"type": "delta", "text": delta_text}
+
+        full_content = "".join(full_content_parts)
+        decision = self._parse_decision(full_content, latest_answer=latest_answer)
+        yield {"type": "done", "decision": decision}
 
     def regenerate_question_avoiding_history(
         self,
@@ -440,3 +499,125 @@ class InterviewerAgent:
         if length >= 60:
             return "normal"
         return "weak"
+
+
+class _JsonStringFieldExtractor:
+    """Incremental extractor for the string value of a specific JSON field.
+
+    Given a stream of text chunks that form a JSON object, tracks a state
+    machine to find ``"field_name": "..."`` and yield the characters inside
+    the string value as they arrive, correctly handling JSON escape
+    sequences (``\\"``, ``\\\\``, ``\\n``, ``\\t``, ``\\r``, ``\\/``, ``\\b``,
+    ``\\f``, ``\\uXXXX``).
+
+    The extractor is forgiving: if the field is never found (non-JSON
+    output, wrong field order, etc.), it simply never yields any text.
+    """
+
+    _SEARCH_KEY = 0       # scanning for the opening " of the field name
+    _IN_KEY = 1           # inside the field name string, matching target
+    _AFTER_KEY = 2        # found the key, skipping whitespace and colon
+    _BEFORE_VALUE = 3     # saw colon, skipping whitespace before value quote
+    _IN_STRING = 4        # inside the value string, emitting characters
+    _DONE = 5             # closing quote found, stop emitting
+
+    _SIMPLE_ESCAPES = {
+        '"': '"', '\\': '\\', '/': '/', 'n': '\n',
+        't': '\t', 'r': '\r', 'b': '\b', 'f': '\f',
+    }
+
+    def __init__(self, field_name: str) -> None:
+        self._target = field_name
+        self._state = self._SEARCH_KEY
+        self._key_buf = ""
+        self._escape_buf = ""  # holds partial escape: "\\" or "\\u" + partial hex
+        self._unicode_need = 0  # how many more hex chars needed for \uXXXX
+
+    def feed(self, text: str) -> str:
+        """Process a chunk of text and return any newly extracted characters."""
+        if self._state == self._DONE:
+            return ""
+
+        output: list[str] = []
+        i = 0
+        n = len(text)
+        while i < n:
+            ch = text[i]
+            i += 1
+
+            if self._state == self._SEARCH_KEY:
+                if ch == '"':
+                    self._state = self._IN_KEY
+                    self._key_buf = ""
+
+            elif self._state == self._IN_KEY:
+                if ch == '"':
+                    if self._key_buf == self._target:
+                        self._state = self._AFTER_KEY
+                    else:
+                        self._state = self._SEARCH_KEY
+                elif ch == "\\":
+                    # consume escaped char inside key name (rare but valid)
+                    if i < n:
+                        self._key_buf += text[i]
+                        i += 1
+                else:
+                    self._key_buf += ch
+                    if not self._target.startswith(self._key_buf):
+                        self._state = self._SEARCH_KEY
+
+            elif self._state == self._AFTER_KEY:
+                if ch == ':':
+                    self._state = self._BEFORE_VALUE
+                elif ch not in ' \t\n\r':
+                    # unexpected character after key, bail
+                    self._state = self._SEARCH_KEY
+
+            elif self._state == self._BEFORE_VALUE:
+                if ch == '"':
+                    self._state = self._IN_STRING
+                    self._escape_buf = ""
+                    self._unicode_need = 0
+                elif ch in ' \t\n\r':
+                    continue
+                else:
+                    # value is not a string (null, number, object...)
+                    self._state = self._DONE
+                    break
+
+            elif self._state == self._IN_STRING:
+                if self._escape_buf:
+                    if self._escape_buf == "\\":
+                        # first char after backslash
+                        if ch == "u":
+                            self._escape_buf = "\\u"
+                            self._unicode_need = 4
+                        else:
+                            output.append(self._SIMPLE_ESCAPES.get(ch, ch))
+                            self._escape_buf = ""
+                    elif self._escape_buf.startswith("\\u"):
+                        # collecting hex digits for \uXXXX
+                        self._unicode_need -= 1
+                        if self._unicode_need == 0:
+                            # final hex digit - complete sequence is in escape_buf + ch
+                            hex_str = self._escape_buf[2:] + ch
+                            try:
+                                code_point = int(hex_str, 16)
+                                output.append(chr(code_point))
+                            except ValueError:
+                                pass
+                            self._escape_buf = ""
+                        else:
+                            self._escape_buf += ch
+                elif ch == "\\":
+                    self._escape_buf = "\\"
+                elif ch == '"':
+                    self._state = self._DONE
+                    break
+                else:
+                    output.append(ch)
+
+            elif self._state == self._DONE:
+                break
+
+        return "".join(output)

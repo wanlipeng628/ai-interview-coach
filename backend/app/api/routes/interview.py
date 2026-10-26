@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from openai import OpenAIError
 
 from app.application.interview.interview_dto import (
@@ -136,6 +137,28 @@ async def submit_answer(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"LLM provider error: {exc}",
         ) from exc
+
+
+@router.post("/{session_id}/answer/stream")
+async def submit_answer_stream(
+    session_id: str,
+    request: SubmitAnswerRequest,
+    user_id: int = Depends(get_current_user_id),
+    service: InterviewService = Depends(get_interview_service),
+) -> StreamingResponse:
+    """Stream the next interviewer question as SSE events.
+
+    Events: stage → delta (multiple) → done
+    On failure after headers are sent: error event then close.
+    """
+    try:
+        event_stream = service.submit_answer_stream(user_id, session_id, request)
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
+    return StreamingResponse(event_stream, media_type="text/event-stream")
 
 
 @router.post(

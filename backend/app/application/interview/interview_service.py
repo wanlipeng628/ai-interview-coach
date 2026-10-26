@@ -1,4 +1,6 @@
+from collections.abc import Generator
 from datetime import datetime
+import json
 import logging
 import re
 import threading
@@ -231,6 +233,251 @@ class InterviewService:
             decision=decision.decision,
             reason=decision.reason,
         )
+
+    def submit_answer_stream(
+        self,
+        user_id: int,
+        session_id: str,
+        request: SubmitAnswerRequest,
+    ) -> Generator[str, None, None]:
+        """Streaming version of submit_answer.
+
+        Returns a generator that yields SSE-formatted event strings.
+        Validation (session not found, empty answer) happens before the
+        first yield so the caller can return HTTP errors instead of SSE.
+        """
+        # 前置校验：与同步路径完全一致的校验逻辑
+        session = self._repository.get_by_id(user_id, session_id)
+        if session is None:
+            raise ValueError("Interview session not found")
+        if session.status != InterviewSessionStatus.IN_PROGRESS:
+            raise ValueError("Interview session is not in progress")
+
+        answer = request.answer.strip()
+        if not answer:
+            raise ValueError("Answer cannot be empty")
+
+        return self._submit_answer_stream_inner(session, user_id, session_id, answer)
+
+    def _submit_answer_stream_inner(
+        self,
+        session: InterviewSession,
+        user_id: int,
+        session_id: str,
+        answer: str,
+    ) -> Generator[str, None, None]:
+        """Internal generator that yields SSE events for the answer stream."""
+        round_no = session.current_round
+        elapsed_minutes = self._elapsed_minutes(session.created_at)
+
+        # 硬上限兜底：与同步路径逻辑完全一致
+        hard_cap_minutes = session.duration_minutes * 2
+        if elapsed_minutes >= hard_cap_minutes:
+            self._repository.append_message(
+                user_id=user_id,
+                session_id=session_id,
+                role="USER_CANDIDATE",
+                content=answer,
+                round_no=round_no,
+            )
+            self._repository.finish(user_id, session_id)
+            self._schedule_backfill_reviews(user_id, session_id)
+            final_response = SubmitAnswerResponse(
+                session_id=session_id,
+                round_no=round_no,
+                next_question=None,
+                is_finished=True,
+                decision="end",
+                reason="Reached hard duration cap",
+            )
+            yield self._sse_event("done", final_response.model_dump())
+            return
+
+        next_round = round_no + 1
+        history = self._repository.list_messages(user_id, session_id)
+        # 推迟落库：与同步路径一致，先在内存拼接 history
+        history_with_answer = history + [
+            {
+                "role": "USER_CANDIDATE",
+                "round_no": str(round_no),
+                "content": answer,
+            }
+        ]
+
+        interviewer_agent = self._interviewer_agent or InterviewerAgent()
+
+        # 发送阶段提示
+        yield self._sse_event("stage", {"stage": "generating", "label": "正在生成问题"})
+
+        try:
+            decision = yield from self._generate_next_question_stream_with_retry(
+                interviewer_agent,
+                job_role=session.job_role,
+                round_no=next_round,
+                duration_minutes=session.duration_minutes,
+                elapsed_minutes=elapsed_minutes,
+                direction=session.direction,
+                interviewer_mode=session.interviewer_mode,
+                resume_text=self._extract_resume_text(history_with_answer),
+                history=history_with_answer,
+            )
+        except (RateLimitError, APITimeoutError, APIConnectionError) as exc:
+            # 所有重试都失败了：发 error 事件后关闭连接
+            yield self._sse_event("error", {"detail": f"LLM provider error: {exc}"})
+            return
+        except Exception as exc:  # noqa: BLE001
+            yield self._sse_event("error", {"detail": str(exc)})
+            return
+
+        if decision.decision == "end":
+            # 面试官决定结束：用户回答落库，保证复盘数据完整
+            self._repository.append_message(
+                user_id=user_id,
+                session_id=session_id,
+                role="USER_CANDIDATE",
+                content=answer,
+                round_no=round_no,
+            )
+            self._repository.finish(user_id, session_id)
+            self._schedule_backfill_reviews(user_id, session_id)
+            final_response = SubmitAnswerResponse(
+                session_id=session_id,
+                round_no=round_no,
+                next_question=None,
+                is_finished=True,
+                decision=decision.decision,
+                reason=decision.reason,
+            )
+            yield self._sse_event("done", final_response.model_dump())
+            return
+
+        next_question = decision.question
+        if not next_question:
+            yield self._sse_event("error", {"detail": "LLM did not return next question"})
+            return
+
+        # 重复题兜底：与同步路径一致的逻辑
+        if self._is_repeated_question(next_question, history_with_answer):
+            regenerated_question = interviewer_agent.regenerate_question_avoiding_history(
+                job_role=session.job_role,
+                direction=session.direction,
+                interviewer_mode=session.interviewer_mode,
+                duplicated_question=next_question,
+                history=history_with_answer,
+            )
+            if regenerated_question and not self._is_repeated_question(
+                regenerated_question, history_with_answer
+            ):
+                next_question = regenerated_question
+                # 重新生成的问题一次性发送（兜底场景，不要求流式）
+                yield self._sse_event("delta", {"text": regenerated_question})
+            else:
+                next_question = self._build_non_repeated_question(
+                    session.direction, history_with_answer
+                )
+                yield self._sse_event("delta", {"text": next_question})
+
+        # LLM 成功后才落库：与同步路径一致的推迟落库策略
+        self._repository.append_message(
+            user_id=user_id,
+            session_id=session_id,
+            role="USER_CANDIDATE",
+            content=answer,
+            round_no=round_no,
+        )
+        self._repository.append_message(
+            user_id=user_id,
+            session_id=session_id,
+            role="AI_INTERVIEWER",
+            content=next_question,
+            round_no=next_round,
+        )
+        self._repository.advance_round(user_id, session_id, next_round)
+
+        final_response = SubmitAnswerResponse(
+            session_id=session_id,
+            round_no=next_round,
+            next_question=next_question,
+            is_finished=False,
+            decision=decision.decision,
+            reason=decision.reason,
+        )
+        yield self._sse_event("done", final_response.model_dump())
+
+    def _generate_next_question_stream_with_retry(
+        self,
+        agent: InterviewerAgent,
+        *,
+        job_role: str,
+        round_no: int,
+        duration_minutes: int,
+        elapsed_minutes: int,
+        direction: str | None,
+        interviewer_mode: str | None,
+        resume_text: str | None,
+        history: list[dict[str, str]],
+    ) -> Generator[str, None, object]:
+        """Streaming version of _generate_next_question_with_retry.
+
+        Yields delta text chunks. Returns the final InterviewerDecision.
+
+        只对连接阶段的可恢复错误重试（还没吐出任何内容时）。
+        一旦开始吐出 delta，后续错误直接抛出（不能中途重试——前端已经看到部分内容了）。
+        退避参数与同步路径一致：3s / 10s，最多 3 次尝试。
+        """
+        max_attempts = 3
+        backoff_seconds = [3.0, 10.0]
+        last_error: Exception | None = None
+        logger = logging.getLogger(__name__)
+
+        for attempt in range(max_attempts):
+            # 是否已经吐过内容：吐过就不能重试，否则前端会看到同一道题被重复拼一遍
+            emitted = False
+            try:
+                stream = agent.generate_next_question_stream(
+                    job_role=job_role,
+                    round_no=round_no,
+                    duration_minutes=duration_minutes,
+                    elapsed_minutes=elapsed_minutes,
+                    direction=direction,
+                    interviewer_mode=interviewer_mode,
+                    resume_text=resume_text,
+                    history=history,
+                )
+                for event in stream:
+                    if event["type"] == "delta":
+                        emitted = True
+                        yield event["text"]
+                    elif event["type"] == "done":
+                        return event["decision"]
+                # 流结束了却没有 done：不能静默当作成功
+                raise RuntimeError("LLM stream ended without done event")
+            except (RateLimitError, APITimeoutError, APIConnectionError) as exc:
+                if emitted:
+                    # 已经吐出部分内容，重试会让前端出现重复文本，只能抛出去
+                    raise
+                last_error = exc
+                if attempt < max_attempts - 1:
+                    wait = backoff_seconds[attempt]
+                    logger.warning(
+                        "LLM stream failed (attempt %s/%s), retrying in %.0fs: %s: %s",
+                        attempt + 1,
+                        max_attempts,
+                        wait,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    time.sleep(wait)
+                else:
+                    raise
+        # 不会走到这里，只是让类型检查满意
+        if last_error is not None:
+            raise last_error
+
+    @staticmethod
+    def _sse_event(event_name: str, data: dict) -> str:
+        """Format a Server-Sent Event with event name and JSON data."""
+        return f"event: {event_name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     def finish_interview(self, user_id: int, session_id: str) -> FinishInterviewResponse:
         session = self._repository.get_by_id(user_id, session_id)

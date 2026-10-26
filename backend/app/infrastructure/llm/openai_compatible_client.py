@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 from openai import OpenAI
 
 from app.shared.config import settings
@@ -26,3 +28,24 @@ class OpenAICompatibleClient:
         if not content:
             raise RuntimeError("LLM returned empty content")
         return content.strip()
+
+    def chat_stream(self, messages: list[dict[str, str]]) -> Iterator[str]:
+        """Stream chat completions, yielding content text chunks incrementally.
+
+        The iterator is consumed lazily; closing it stops the underlying stream.
+        """
+        stream = self._client.chat.completions.create(
+            model=settings.llm_model,
+            messages=messages,
+            temperature=settings.llm_temperature,
+            stream=True,
+        )
+        try:
+            for event in stream:
+                if not event.choices:
+                    continue
+                content = event.choices[0].delta.content
+                if content:
+                    yield content
+        finally:
+            stream.close()
