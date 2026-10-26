@@ -1,6 +1,6 @@
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from app.shared.config import settings
 
@@ -13,6 +13,11 @@ class OpenAICompatibleClient:
             raise RuntimeError("LLM_API_KEY is required")
 
         self._client = OpenAI(
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+            timeout=settings.llm_timeout_seconds,
+        )
+        self._async_client = AsyncOpenAI(
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
             timeout=settings.llm_timeout_seconds,
@@ -41,20 +46,20 @@ class OpenAICompatibleClient:
             raise RuntimeError("LLM returned empty content")
         return content.strip()
 
-    def chat_stream(
+    async def achat_stream(
         self,
         messages: list[dict[str, str]],
         thinking_mode: str | None = None,
-    ) -> Iterator[str]:
-        """Stream chat completions, yielding content text chunks incrementally.
+    ) -> AsyncIterator[str]:
+        """Async streaming chat completions, yielding content text chunks.
 
-        The iterator is consumed lazily; closing it stops the underlying stream.
+        断连时上游协程会被取消，`finally` 里的 `aclose` 负责释放底层 HTTP 连接。
         """
         kwargs: dict = {}
         extra_body = self._thinking_extra_body(thinking_mode)
         if extra_body is not None:
             kwargs["extra_body"] = extra_body
-        stream = self._client.chat.completions.create(
+        stream = await self._async_client.chat.completions.create(
             model=settings.llm_model,
             messages=messages,
             temperature=settings.llm_temperature,
@@ -62,11 +67,11 @@ class OpenAICompatibleClient:
             **kwargs,
         )
         try:
-            for event in stream:
+            async for event in stream:
                 if not event.choices:
                     continue
                 content = event.choices[0].delta.content
                 if content:
                     yield content
         finally:
-            stream.close()
+            await stream.close()

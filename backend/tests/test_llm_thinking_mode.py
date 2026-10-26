@@ -1,13 +1,14 @@
 """出题链路 thinking 模式开关的单元测试。
 
 覆盖三层：
-1. OpenAICompatibleClient.chat / chat_stream 对 thinking_mode 的透传与省略；
+1. OpenAICompatibleClient.chat / achat_stream 对 thinking_mode 的透传与省略；
 2. 出题链路（同步 / 流式 / 去重重生成）带上配置值；
 3. 复盘链路始终不传 thinking_mode，保持思考开启。
 """
 
+import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -16,20 +17,20 @@ from app.infrastructure.llm.openai_compatible_client import OpenAICompatibleClie
 from app.shared.config import settings
 
 
-class FakeStream:
-    """最小可迭代流对象，模拟 openai SDK 的 stream 响应。"""
+class FakeAsyncStream:
+    """最小可异步迭代流对象，模拟 openai SDK 的 AsyncStream 响应。"""
 
     def __init__(self, texts: list[str]) -> None:
         self._texts = texts
         self.closed = False
 
-    def __iter__(self):
+    async def __aiter__(self):
         for text in self._texts:
             yield SimpleNamespace(
                 choices=[SimpleNamespace(delta=SimpleNamespace(content=text))]
             )
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.closed = True
 
 
@@ -40,16 +41,24 @@ def _chat_response(content: str) -> SimpleNamespace:
 
 
 @pytest.fixture
-def mock_openai() -> MagicMock:
-    """替换模块内的 OpenAI 客户端，避免真实网络请求与 API Key 依赖。"""
-    with patch(
-        "app.infrastructure.llm.openai_compatible_client.OpenAI"
-    ) as openai_cls, patch.object(settings, "llm_api_key", "test-key"):
-        yield openai_cls
+def mock_openai() -> tuple[MagicMock, MagicMock]:
+    """替换模块内的同步 / 异步客户端，避免真实网络请求与 API Key 依赖。"""
+    with (
+        patch("app.infrastructure.llm.openai_compatible_client.OpenAI") as openai_cls,
+        patch(
+            "app.infrastructure.llm.openai_compatible_client.AsyncOpenAI"
+        ) as async_openai_cls,
+        patch.object(settings, "llm_api_key", "test-key"),
+    ):
+        yield openai_cls, async_openai_cls
 
 
 def _create_kwargs(openai_cls: MagicMock) -> dict:
     return openai_cls.return_value.chat.completions.create.call_args.kwargs
+
+
+def _acreate_kwargs(async_openai_cls: MagicMock) -> dict:
+    return async_openai_cls.return_value.chat.completions.create.call_args.kwargs
 
 
 @pytest.mark.parametrize(
@@ -60,7 +69,8 @@ def _create_kwargs(openai_cls: MagicMock) -> dict:
     ],
 )
 def test_chat_passes_thinking_extra_body(mock_openai, thinking_mode, expected):
-    mock_openai.return_value.chat.completions.create.return_value = _chat_response(
+    openai_cls, _ = mock_openai
+    openai_cls.return_value.chat.completions.create.return_value = _chat_response(
         " 问题内容 "
     )
     client = OpenAICompatibleClient()
@@ -68,18 +78,19 @@ def test_chat_passes_thinking_extra_body(mock_openai, thinking_mode, expected):
     result = client.chat([{"role": "user", "content": "hi"}], thinking_mode=thinking_mode)
     assert result == "问题内容"
 
-    kwargs = _create_kwargs(mock_openai)
+    kwargs = _create_kwargs(openai_cls)
     assert kwargs["extra_body"] == expected
     assert "stream" not in kwargs
 
 
 def test_chat_omits_extra_body_when_thinking_mode_is_none(mock_openai):
-    mock_openai.return_value.chat.completions.create.return_value = _chat_response("ok")
+    openai_cls, _ = mock_openai
+    openai_cls.return_value.chat.completions.create.return_value = _chat_response("ok")
     client = OpenAICompatibleClient()
 
     client.chat([{"role": "user", "content": "hi"}])
 
-    assert "extra_body" not in _create_kwargs(mock_openai)
+    assert "extra_body" not in _create_kwargs(openai_cls)
 
 
 @pytest.mark.parametrize(
@@ -89,29 +100,44 @@ def test_chat_omits_extra_body_when_thinking_mode_is_none(mock_openai):
         ("enabled", {"thinking": {"type": "enabled"}}),
     ],
 )
-def test_chat_stream_passes_thinking_extra_body(mock_openai, thinking_mode, expected):
-    stream = FakeStream(["a", "b"])
-    mock_openai.return_value.chat.completions.create.return_value = stream
+def test_achat_stream_passes_thinking_extra_body(mock_openai, thinking_mode, expected):
+    _, async_openai_cls = mock_openai
+    stream = FakeAsyncStream(["a", "b"])
+    async_openai_cls.return_value.chat.completions.create = AsyncMock(return_value=stream)
     client = OpenAICompatibleClient()
 
-    chunks = list(
-        client.chat_stream([{"role": "user", "content": "hi"}], thinking_mode=thinking_mode)
-    )
+    async def collect() -> list[str]:
+        return [
+            chunk
+            async for chunk in client.achat_stream(
+                [{"role": "user", "content": "hi"}], thinking_mode=thinking_mode
+            )
+        ]
+
+    chunks = asyncio.run(collect())
 
     assert chunks == ["a", "b"]
-    kwargs = _create_kwargs(mock_openai)
+    kwargs = _acreate_kwargs(async_openai_cls)
     assert kwargs["extra_body"] == expected
     assert kwargs["stream"] is True
     assert stream.closed is True
 
 
-def test_chat_stream_omits_extra_body_when_thinking_mode_is_none(mock_openai):
-    mock_openai.return_value.chat.completions.create.return_value = FakeStream([])
+def test_achat_stream_omits_extra_body_when_thinking_mode_is_none(mock_openai):
+    _, async_openai_cls = mock_openai
+    async_openai_cls.return_value.chat.completions.create = AsyncMock(
+        return_value=FakeAsyncStream([])
+    )
     client = OpenAICompatibleClient()
 
-    list(client.chat_stream([{"role": "user", "content": "hi"}]))
+    async def collect() -> list[str]:
+        return [
+            chunk
+            async for chunk in client.achat_stream([{"role": "user", "content": "hi"}])
+        ]
 
-    assert "extra_body" not in _create_kwargs(mock_openai)
+    assert asyncio.run(collect()) == []
+    assert "extra_body" not in _acreate_kwargs(async_openai_cls)
 
 
 class RecordingLLMClient:
@@ -125,8 +151,8 @@ class RecordingLLMClient:
         self.calls.append(("chat", thinking_mode))
         return self.content
 
-    def chat_stream(self, messages, thinking_mode=None):
-        self.calls.append(("chat_stream", thinking_mode))
+    async def achat_stream(self, messages, thinking_mode=None):
+        self.calls.append(("achat_stream", thinking_mode))
         yield self.content
 
 
@@ -153,14 +179,21 @@ def test_generate_next_question_uses_configured_thinking():
     assert fake.calls == [("chat", "enabled")]
 
 
-def test_generate_next_question_stream_uses_configured_thinking():
+def test_agenerate_next_question_stream_uses_configured_thinking():
     fake = RecordingLLMClient('{"decision": "continue", "question": "请自我介绍？"}')
     agent = InterviewerAgent(llm_client=fake)
 
-    with patch.object(settings, "llm_question_thinking", "disabled"):
-        list(agent.generate_next_question_stream(**_question_kwargs()))
+    async def collect() -> list[dict]:
+        return [
+            event
+            async for event in agent.agenerate_next_question_stream(**_question_kwargs())
+        ]
 
-    assert fake.calls == [("chat_stream", "disabled")]
+    with patch.object(settings, "llm_question_thinking", "disabled"):
+        events = asyncio.run(collect())
+
+    assert fake.calls == [("achat_stream", "disabled")]
+    assert [event["type"] for event in events] == ["delta", "done"]
 
 
 def test_regenerate_question_uses_configured_thinking():
