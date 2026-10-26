@@ -1,0 +1,108 @@
+{
+  "source": "AIC-80-固定输入包-v1.md",
+  "duration_minutes": 45,
+  "temperature": 0.7,
+  "job_roles": {
+    "J-BE": "Java开发工程师",
+    "J-AI": "AI应用开发工程师",
+    "J-ANY": "开发工程师"
+  },
+  "scenes": [
+    {
+      "scene_id": "S01",
+      "job_role": "Java开发工程师",
+      "job_role_code": "J-BE",
+      "resume_id": "R1",
+      "direction": "FULL_MOCK",
+      "mode": "NORMAL"
+    },
+    {
+      "scene_id": "S02",
+      "job_role": "Java开发工程师",
+      "job_role_code": "J-BE",
+      "resume_id": "R2",
+      "direction": "FULL_MOCK",
+      "mode": "NORMAL"
+    },
+    {
+      "scene_id": "S03",
+      "job_role": "Java开发工程师",
+      "job_role_code": "J-BE",
+      "resume_id": "R3",
+      "direction": "FULL_MOCK",
+      "mode": "NORMAL"
+    },
+    {
+      "scene_id": "S04",
+      "job_role": "AI应用开发工程师",
+      "job_role_code": "J-AI",
+      "resume_id": "R4",
+      "direction": "FULL_MOCK",
+      "mode": "NORMAL"
+    },
+    {
+      "scene_id": "S05",
+      "job_role": "AI应用开发工程师",
+      "job_role_code": "J-AI",
+      "resume_id": "R5",
+      "direction": "PROJECT_DEEP_DIVE",
+      "mode": "NORMAL"
+    },
+    {
+      "scene_id": "S06",
+      "job_role": "开发工程师",
+      "job_role_code": "J-ANY",
+      "resume_id": "R2",
+      "direction": "FULL_MOCK",
+      "mode": "NORMAL"
+    },
+    {
+      "scene_id": "S07",
+      "job_role": "Java开发工程师",
+      "job_role_code": "J-BE",
+      "resume_id": "R2",
+      "direction": "JAVA_BASIC",
+      "mode": "STRICT"
+    },
+    {
+      "scene_id": "S08",
+      "job_role": "Java开发工程师",
+      "job_role_code": "J-BE",
+      "resume_id": "R2",
+      "direction": "CONCURRENCY",
+      "mode": "BIG_TECH_FIRST_ROUND"
+    },
+    {
+      "scene_id": "S09",
+      "job_role": "Java开发工程师",
+      "job_role_code": "J-BE",
+      "resume_id": "R3",
+      "direction": "SYSTEM_DESIGN",
+      "mode": "NORMAL"
+    },
+    {
+      "scene_id": "S10",
+      "job_role": "Java开发工程师",
+      "job_role_code": "J-BE",
+      "resume_id": "R2",
+      "direction": "TROUBLESHOOTING",
+      "mode": "NORMAL"
+    },
+    {
+      "scene_id": "S11",
+      "job_role": "Java开发工程师",
+      "job_role_code": "J-BE",
+      "resume_id": "R3",
+      "direction": "PROJECT_DEEP_DIVE",
+      "mode": "STRICT"
+    },
+    {
+      "scene_id": "S12",
+      "job_role": "AI应用开发工程师",
+      "job_role_code": "J-AI",
+      "resume_id": "R6",
+      "direction": "FULL_MOCK",
+      "mode": "GENTLE"
+    }
+  ]
+}
