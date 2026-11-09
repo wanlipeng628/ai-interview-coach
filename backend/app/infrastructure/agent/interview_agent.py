@@ -68,7 +68,9 @@ class InterviewerAgent:
 5. 不要让候选人同时回答实现、原理、优化、排查、对比多个方向。
 6. 如果要深入，只选择候选人回答里最关键的一个点继续问。
 7. 不要重复历史中已经问过的问题，也不要换一种说法重复考察同一个知识点。
-8. question 里不得出现“回答不错、回答不完整、你刚才没有说清楚、建议你”等评价或指导。
+8. 【已问过的问题】清单里的题目全部算问过，即使它不在最近几轮对话里。判断是否重复，看考察的事实点和期望的答案是否相同，跟措辞无关。
+9. 同一项目可以继续深挖，但必须往更深的层次走，不能换个说法回到同一个问题上。如果简历上的项目细节已经挖得差不多，不要再回头重问旧知识点，改为切换考察维度：项目实现细节 → 设计取舍与权衡 → 线上故障与排查 → 技术广度与原理 → 反问环节。
+10. question 里不得出现“回答不错、回答不完整、你刚才没有说清楚、建议你”等评价或指导。
 
 你必须只输出严格 JSON，不要输出 Markdown。JSON 格式：
 {
@@ -100,8 +102,19 @@ class InterviewerAgent:
         interviewer_mode: str | None,
         resume_text: str | None,
         history: list[dict[str, str]],
+        asked_questions: list[str] | None = None,
     ) -> list[dict[str, str]]:
-        """同步与异步出题链路共用的 prompt，避免两份实现漂移。"""
+        """同步与异步出题链路共用的 prompt，避免两份实现漂移。
+
+        asked_questions 传全量已问问题清单：history 只喂最近几轮做对话上下文，
+        早期问过的题靠这份清单让模型看见，否则长会话必重复。
+        """
+        if asked_questions is None:
+            asked_questions = [
+                item.get("content", "")
+                for item in history
+                if item.get("role") == "AI_INTERVIEWER"
+            ]
         if elapsed_minutes >= duration_minutes:
             pacing = f"已超时长上限约 {elapsed_minutes - duration_minutes} 分钟：材料够了就收尾，不够就继续问"
         else:
@@ -118,8 +131,10 @@ class InterviewerAgent:
                     f"面试时长上限：{duration_minutes} 分钟\n"
                     f"已进行时间：约 {elapsed_minutes} 分钟（{pacing}）\n"
                     f"候选人简历：\n{resume_text or '未提供简历'}\n\n"
-                    "历史问答：\n"
+                    "历史问答（仅最近几轮）：\n"
                     f"{self._format_history(history)}\n\n"
+                    "已问过的问题（全部，不得重复）：\n"
+                    f"{self._format_asked_questions(list(asked_questions))}\n\n"
                     "请基于候选人最近一轮回答，先在心里评估回答质量，再输出下一步决策。\n"
                     "再次强调：question 只能是下一个单一面试问题，不能包含任何评价或指导。"
                 ),
@@ -136,6 +151,7 @@ class InterviewerAgent:
         interviewer_mode: str | None,
         resume_text: str | None,
         history: list[dict[str, str]],
+        asked_questions: list[str] | None = None,
     ) -> InterviewerDecision:
         latest_answer = self._latest_candidate_answer(history)
         messages = self._build_next_question_messages(
@@ -147,6 +163,7 @@ class InterviewerAgent:
             interviewer_mode=interviewer_mode,
             resume_text=resume_text,
             history=history,
+            asked_questions=asked_questions,
         )
         content = self._llm_client.chat(
             messages,
@@ -164,6 +181,7 @@ class InterviewerAgent:
         interviewer_mode: str | None,
         resume_text: str | None,
         history: list[dict[str, str]],
+        asked_questions: list[str] | None = None,
     ) -> AsyncIterator[dict]:
         """Streaming version of generate_next_question.
 
@@ -184,6 +202,7 @@ class InterviewerAgent:
             interviewer_mode=interviewer_mode,
             resume_text=resume_text,
             history=history,
+            asked_questions=asked_questions,
         )
 
         full_content_parts: list[str] = []
@@ -373,7 +392,8 @@ class InterviewerAgent:
     def _format_asked_questions(self, questions: list[str]) -> str:
         if not questions:
             return "暂无已问问题。"
-        return "\n".join(f"{index + 1}. {question}" for index, question in enumerate(questions[-20:]))
+        # 不做截断：长会话里早期问过的题正是重复的源头，必须全量给模型看到。
+        return "\n".join(f"{index + 1}. {question}" for index, question in enumerate(questions))
 
     def _parse_decision(self, content: str, latest_answer: str | None) -> InterviewerDecision:
         try:

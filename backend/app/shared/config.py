@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 60
     # 只控制出题链路的 thinking 模式（enabled / disabled），复盘链路始终开启思考
     llm_question_thinking: str = "disabled"
+    # 判重阈值：相邻两字 Jaccard 相似度。0.35 来自 15 场真实会话回归：
+    # 真重复 0.198~0.642，合理递进追问 0.025~0.143，两段有重叠，
+    # 所以这个阈值只拦最明显的重复；长会话的预防靠 prompt 里的全量已问清单。
+    question_duplicate_threshold: float = 0.35
     agentscope_project: str = "interview-coach"
 
     @computed_field

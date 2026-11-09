@@ -36,6 +36,7 @@ from app.domain.interview.entities import (
 from app.domain.interview.repositories import InterviewRepository
 from app.domain.interview.services import InterviewQuestionPolicy
 from app.infrastructure.agent.interview_agent import InterviewerAgent, InterviewerDecision
+from app.shared.config import settings
 
 RESUME_CONTEXT_PREFIX = "RESUME_CONTEXT"
 LEGACY_RESUME_PREFIXES = (
@@ -172,6 +173,9 @@ class InterviewService:
                 "content": answer,
             }
         ]
+        # 全量已问问题清单：history 只能抽最近几轮当上下文，
+        # 早期题必须靠这份清单让模型看到（长会话重复的根因就是看不到）。
+        asked_questions = self._collect_asked_questions(history_with_answer)
 
         interviewer_agent = self._interviewer_agent or InterviewerAgent()
         decision = self._generate_next_question_with_retry(
@@ -184,6 +188,7 @@ class InterviewService:
             interviewer_mode=session.interviewer_mode,
             resume_text=self._extract_resume_text(history_with_answer),
             history=history_with_answer,
+            asked_questions=asked_questions,
         )
 
         if decision.decision == "end":
@@ -345,6 +350,8 @@ class InterviewService:
 
         # 心跳由消费侧驱动：等待下一个 delta 超时就插一帧注释帧，
         # 首个 delta 之后不再发。重试退避期同样还没吐出 delta，心跳继续。
+        interviewers_asked = self._collect_asked_questions(history_with_answer)
+
         inner_stream = self._agenerate_next_question_stream_with_retry(
             interviewer_agent,
             job_role=session.job_role,
@@ -355,6 +362,7 @@ class InterviewService:
             interviewer_mode=session.interviewer_mode,
             resume_text=self._extract_resume_text(history_with_answer),
             history=history_with_answer,
+            asked_questions=interviewers_asked,
         )
         decision: InterviewerDecision | None = None
         heartbeat_stream = self._astream_with_heartbeat(inner_stream, is_disconnected)
@@ -537,6 +545,7 @@ class InterviewService:
         interviewer_mode: str | None,
         resume_text: str | None,
         history: list[dict[str, str]],
+        asked_questions: list[str] | None = None,
     ) -> AsyncIterator[tuple[str, object]]:
         """Streaming version of _generate_next_question_with_retry.
 
@@ -564,6 +573,7 @@ class InterviewService:
                     interviewer_mode=interviewer_mode,
                     resume_text=resume_text,
                     history=history,
+                    asked_questions=asked_questions,
                 )
                 async for event in stream:
                     if event["type"] == "delta":
@@ -728,6 +738,7 @@ class InterviewService:
         interviewer_mode: str | None,
         resume_text: str | None,
         history: list[dict[str, str]],
+        asked_questions: list[str] | None = None,
     ):
         """Generate next question with backoff retry on recoverable LLM errors.
 
@@ -754,6 +765,7 @@ class InterviewService:
                     interviewer_mode=interviewer_mode,
                     resume_text=resume_text,
                     history=history,
+                    asked_questions=asked_questions,
                 )
             except (RateLimitError, APITimeoutError, APIConnectionError) as exc:
                 last_error = exc
@@ -959,6 +971,15 @@ class InterviewService:
             return "normal"
         return "weak"
 
+    @staticmethod
+    def _collect_asked_questions(history: list[dict[str, str]]) -> list[str]:
+        """抽出全部已问问题（不只是最近几轮），用于出题时避免重复。"""
+        return [
+            item.get("content", "")
+            for item in history
+            if item.get("role") == "AI_INTERVIEWER" and item.get("content")
+        ]
+
     def _is_repeated_question(self, question: str, history: list[dict[str, str]]) -> bool:
         normalized_question = self._normalize_question_text(question)
         if not normalized_question:
@@ -973,7 +994,7 @@ class InterviewService:
             if normalized_question == previous_question:
                 return True
             similarity = self._text_similarity(normalized_question, previous_question)
-            if similarity >= 0.72:
+            if similarity >= settings.question_duplicate_threshold:
                 return True
         return False
 
