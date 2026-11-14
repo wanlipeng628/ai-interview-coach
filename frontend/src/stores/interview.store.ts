@@ -256,20 +256,10 @@ export const useInterviewStore = defineStore('interview', {
                 if (isCurrent()) this.stageLabel = label
               },
               onDelta: ({ text: delta }) => {
+                // 题面定稿前不下发：后端已不再转发出题阶段的 delta。
+                // 先展示的那一版可能被重生成替掉（重生成时题面会跳变），所以这里丢弃，
+                // 等 done 里的定稿题面再整条渲染。保留回调只为了兼容旧服务端的字段。
                 if (!isCurrent() || !delta) return
-                if (!streamedMessageId) {
-                  streamedMessageId = uuid()
-                  this.messages.push({
-                    id: streamedMessageId,
-                    role: 'ai',
-                    content: '',
-                    createdAt: new Date().toISOString(),
-                    streaming: true,
-                  })
-                  this.isStreaming = true
-                }
-                const message = this.messages.find((item) => item.id === streamedMessageId)
-                if (message) message.content += delta
               },
             },
             controller.signal,
@@ -339,6 +329,8 @@ export const useInterviewStore = defineStore('interview', {
           questionNo: response.round_no,
           content: response.next_question,
           createdAt: new Date().toISOString(),
+          // 这是定稿题面，播放一次打字机动画；内容不会再变
+          animate: true,
         })
       }
 

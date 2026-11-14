@@ -453,6 +453,52 @@ def test_stream_output_is_properly_framed() -> None:
             or line.startswith(": ")
         ), f"裸文本漏进了 SSE 流: {line!r}"
 
-    assert payload.count("event: delta") == 2
+    # 题面不再以 delta 下发：先出去的那一版可能被重生成替掉，候选人会看到题目跳变
+    assert payload.count("event: delta") == 0
+    assert payload.count("event: done") == 1
+
+
+def test_multi_question_first_draft_never_reaches_client() -> None:
+    """验收用例：首稿两问、重生成后一问。
+
+    等待期间题面为空（流里没有任何 delta），done 里只带重生成后的那道题。
+    """
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_session()
+    repo.list_messages.return_value = []
+
+    first_draft = "你在导入服务里用的什么垃圾收集器，为什么没选 G1？"
+    final_question = "你在导入服务里用的什么垃圾收集器？"
+
+    async def stream_first_draft(**kwargs):
+        # 首稿逐段吐出去，但服务层不该转发给客户端
+        yield {"type": "delta", "text": first_draft[:8]}
+        yield {"type": "delta", "text": first_draft[8:]}
+        yield {
+            "type": "done",
+            "decision": InterviewerDecision(
+                decision="continue", question=first_draft, reason="继续"
+            ),
+        }
+
+    agent = MagicMock()
+    agent.agenerate_next_question_stream.side_effect = stream_first_draft
+    agent.regenerate_question_avoiding_history.return_value = final_question
+
+    service = InterviewService(repository=repo, interviewer_agent=agent)
+
+    async def collect() -> list[str]:
+        gen = await service.submit_answer_stream(
+            1, "test-session", SubmitAnswerRequest(answer="我的回答")
+        )
+        return [chunk async for chunk in gen]
+
+    payload = "".join(asyncio.run(collect()))
+
+    assert first_draft not in payload, "首稿两问被下发了"
+    assert final_question in payload
+    assert "event: delta" not in payload
+    assert agent.regenerate_question_avoiding_history.call_count == 1
+
     assert "event: done" in payload
     assert "event: stage" in payload

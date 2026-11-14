@@ -369,7 +369,9 @@ class InterviewService:
                 if kind == "heartbeat":
                     yield payload
                 elif kind == "delta":
-                    yield self._sse_event("delta", {"text": payload})
+                    # 题面定稿前不下发任何片段：先流出去的版本可能随后被重生成替换，
+                    # 候选人会先读到一版、再看着题目被改掉。这里丢弃，等 done 里的定稿题面。
+                    continue
                 else:  # done：重试循环给出的最终决策
                     decision = payload  # type: ignore[assignment]
                     break
@@ -421,18 +423,30 @@ class InterviewService:
             return
 
         # 重复题 / 一次问两问兜底：与同步路径一致的逻辑。
-        # 不改写已吐出的 delta：done 事件里的 next_question 会让前端整条替换。
-        next_question = await self._run_blocking(
-            self._repair_question,
-            agent=interviewer_agent,
-            question=next_question,
-            multi_question_detected=decision.multi_question_detected,
-            history=history_with_answer,
-            job_role=session.job_role,
-            direction=session.direction,
-            interviewer_mode=session.interviewer_mode,
-            session_id=session_id,
-        )
+        # 校验与可能的重新生成都是 LLM 调用，可能持续几秒；这一段用带心跳的等待包起来，
+        # 否则首个内容事件之后到 done 之间是心跳空白期，代理容易在这段时间把连接掉掉。
+        yield self._sse_event("stage", {"stage": "finalizing", "label": "面试官正在确认题目"})
+        try:
+            async for kind, payload in self._await_with_heartbeat(
+                self._run_blocking(
+                    self._repair_question,
+                    agent=interviewer_agent,
+                    question=next_question,
+                    multi_question_detected=decision.multi_question_detected,
+                    history=history_with_answer,
+                    job_role=session.job_role,
+                    direction=session.direction,
+                    interviewer_mode=session.interviewer_mode,
+                    session_id=session_id,
+                ),
+                is_disconnected,
+            ):
+                if kind == "heartbeat":
+                    yield payload
+                else:
+                    next_question = payload  # type: ignore[assignment]
+        except _ClientDisconnected:
+            return
 
         # LLM 成功后才落库：与同步路径一致的推迟落库策略
         await self._run_blocking(
@@ -484,7 +498,6 @@ class InterviewService:
         内层（重试循环）通过 ("done", decision) 把最终决策交出来。
         """
         pending: asyncio.Task[tuple[str, object]] | None = None
-        emitted = False
         interval = SSE_HEARTBEAT_INTERVAL_SECONDS
         # 断连探测不超过 0.5s，同时对 pending 只做一次 anext，不重新发起
         poll_slice = min(interval, 0.5)
@@ -504,8 +517,6 @@ class InterviewService:
                         event = task.result()
                     except StopAsyncIteration:
                         return
-                    if event[0] == "delta":
-                        emitted = True
                     yield event
                     continue
 
@@ -513,7 +524,9 @@ class InterviewService:
                     raise _ClientDisconnected
 
                 now = loop.time()
-                if not emitted and now - last_heartbeat_at >= interval:
+                # 心跳一直发到 done：题面定稿前客户端什么都看不到，
+                # 「已开始输出」不再是停止心跳的理由。
+                if now - last_heartbeat_at >= interval:
                     last_heartbeat_at = now
                     yield ("heartbeat", SSE_HEARTBEAT_FRAME)
         finally:
@@ -522,6 +535,38 @@ class InterviewService:
             if pending is not None:
                 pending.cancel()
                 await asyncio.gather(pending, return_exceptions=True)
+
+    async def _await_with_heartbeat(
+        self,
+        awaitable: Awaitable[_T],
+        is_disconnected: Callable[[], Awaitable[bool]] | None,
+    ) -> AsyncIterator[tuple[str, object]]:
+        """等一个协程完成，期间按间隔发心跳并检测断连。
+
+        用于出题校验 / 重生成这一段：它是 LLM 调用，可能持续几秒，且发生在生成阶段之后，
+        不包心跳的话就是一段空白期。yield ("heartbeat", frame) 与 ("result", value)。
+        """
+        task = asyncio.ensure_future(awaitable)
+        interval = SSE_HEARTBEAT_INTERVAL_SECONDS
+        poll_slice = min(interval, 0.5)
+        loop = asyncio.get_running_loop()
+        last_heartbeat_at = loop.time()
+        try:
+            while True:
+                done, _ = await asyncio.wait({task}, timeout=poll_slice)
+                if task in done:
+                    yield ("result", task.result())
+                    return
+                if is_disconnected is not None and await is_disconnected():
+                    raise _ClientDisconnected
+                now = loop.time()
+                if now - last_heartbeat_at >= interval:
+                    last_heartbeat_at = now
+                    yield ("heartbeat", SSE_HEARTBEAT_FRAME)
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
     async def _agenerate_next_question_stream_with_retry(
         self,

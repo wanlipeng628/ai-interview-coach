@@ -69,8 +69,8 @@ def test_heartbeat_frame_matches_sse_comment_spec() -> None:
 
 # === 心跳时间点 ===
 
-def test_service_emits_heartbeat_between_stage_and_first_delta() -> None:
-    """stage 之后、第一个 delta 之前有心跳；delta 开始后没有。"""
+def test_service_keeps_heartbeat_until_done() -> None:
+    """题面定稿前不发任何片段，心跳一直发到 done。"""
 
     async def slow_stream(**kwargs):
         await asyncio.sleep(0.2)
@@ -92,9 +92,9 @@ def test_service_emits_heartbeat_between_stage_and_first_delta() -> None:
 
     stream = "".join(events)
     assert stream.index("event: stage") < stream.index(SSE_HEARTBEAT_FRAME)
-    assert stream.index(SSE_HEARTBEAT_FRAME) < stream.index("event: delta")
-    assert stream.rindex(SSE_HEARTBEAT_FRAME) < stream.index("event: delta")
-    assert stream.count("event: delta") == 2
+    assert stream.rindex(SSE_HEARTBEAT_FRAME) < stream.index("event: done")
+    # 生成阶段的 delta 不再转发给客户端
+    assert stream.count("event: delta") == 0
     assert not _live_heartbeat_threads()
 
 
@@ -176,7 +176,9 @@ def test_service_inner_exception_becomes_error_event() -> None:
 
     payload = "".join(events)
     assert 'event: error\ndata: {"detail": "boom"}' in payload
-    assert payload.count("event: delta") == 1
+    # 半截题面不会泄露：生成阶段的 delta 不下发
+    assert payload.count("event: delta") == 0
+    assert "半句" not in payload
 
 
 def test_service_propagates_final_decision_and_writes_messages() -> None:

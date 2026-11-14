@@ -101,7 +101,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch
 })
 
-test('流式成功：stage 更新提示、delta 逐字追加、done 收尾', async () => {
+test('题面定稿后才下发：生成期间不渲染，done 后整条出现', async () => {
   const store = resetStore()
   const sse = createSseHarness()
   globalThis.fetch = async (_input, init) => {
@@ -116,20 +116,19 @@ test('流式成功：stage 更新提示、delta 逐字追加、done 收尾', asy
   await waitFor(() => store.stageLabel === '正在生成问题')
   assert.equal(store.generating, true)
 
-  const firstDelta = '那你'
-  sse.push(deltaFrame(firstDelta))
-  await waitFor(() => aiMessages(store).some((item) => item.content === firstDelta))
-  assert.equal(store.isStreaming, true)
+  // 生成阶段的 delta 不渲染：这一版可能被重生成替掉，会看到题目跳变
+  sse.push(deltaFrame('那你'))
+  sse.push(deltaFrame('介绍一下你负责的支付模块'))
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  assert.equal(aiMessages(store).length, 1, '等待期间不应出现题目气泡')
+  assert.equal(store.isStreaming, false)
 
-  const secondDelta = '介绍一下你负责的支付模块'
-  sse.push(deltaFrame(secondDelta))
-  await waitFor(() => store.messages.some((item) => item.content === firstDelta + secondDelta))
-
+  const finalQuestion = '那你介绍一下你负责的支付模块'
   sse.push(
     doneFrame({
       session_id: 's1',
       round_no: 2,
-      next_question: firstDelta + secondDelta,
+      next_question: finalQuestion,
       is_finished: false,
       decision: 'continue',
     }),
@@ -137,12 +136,11 @@ test('流式成功：stage 更新提示、delta 逐字追加、done 收尾', asy
   await promise
 
   const messages = aiMessages(store)
-  assert.equal(messages.length, 2, '只有首题 + 这一条流式题，不应重复插入')
-  assert.equal(messages[1].content, firstDelta + secondDelta)
+  assert.equal(messages.length, 2, '只有首题 + 这一条定稿题')
+  assert.equal(messages[1].content, finalQuestion)
   assert.equal(messages[1].questionNo, 2)
-  assert.equal(messages[1].streaming, false)
+  assert.equal(messages[1].animate, true, '定稿题要播放打字机')
   assert.equal(store.info.currentQuestionNo, 2)
-  assert.equal(store.isStreaming, false)
   assert.equal(store.generating, false)
   assert.equal(store.loading, false)
   assert.equal(store.stageLabel, '')
@@ -153,23 +151,24 @@ test('流式成功：stage 更新提示、delta 逐字追加、done 收尾', asy
   assert.equal(lastFetchInit?.body, JSON.stringify({ answer: '我叫张三，做过支付系统' }))
 })
 
-test('done 的 next_question 为准：重复题兜底不会把两道题粘在一起', async () => {
+test('重生成场景：首稿两问从不出现在界面上，只留定稿那一道', async () => {
   const store = resetStore()
   const sse = createSseHarness()
   globalThis.fetch = async () => sse.response
 
   const promise = store.submitAnswer('回答')
 
-  sse.push(deltaFrame('旧题：介绍一下你的项目'))
-  await waitFor(() => store.messages.some((item) => item.content === '旧题：介绍一下你的项目'))
-  sse.push(deltaFrame('新题：聊聊 JVM 内存模型'))
-  await waitFor(() => store.messages.some((item) => item.content.includes('JVM')))
+  // 首稿是两问，服务端检测后重生成；两个 delta 都不应该渲染
+  sse.push(deltaFrame('旧题：介绍一下你的项目，以及'))
+  sse.push(deltaFrame('你当时是怎么设计的？'))
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  assert.equal(aiMessages(store).length, 1)
 
   sse.push(
     doneFrame({
       session_id: 's1',
       round_no: 2,
-      next_question: '新题：聊聊 JVM 内存模型',
+      next_question: '谈谈你负责的项目里最难的一个技术点？',
       is_finished: false,
       decision: 'switch',
     }),
@@ -178,7 +177,12 @@ test('done 的 next_question 为准：重复题兜底不会把两道题粘在一
 
   const messages = aiMessages(store)
   assert.equal(messages.length, 2)
-  assert.equal(messages[1].content, '新题：聊聊 JVM 内存模型')
+  assert.equal(messages[1].content, '谈谈你负责的项目里最难的一个技术点？')
+  assert.equal(
+    messages.some((item) => item.content.includes('旧题')),
+    false,
+    '首稿不应该出现在任何一条消息里',
+  )
   assert.equal(syncCalls, 0)
 })
 
@@ -202,15 +206,17 @@ test('SSE 非 2xx：丢弃半截气泡并回落同步接口', async () => {
   assert.equal(store.errorMessage, '')
 })
 
-test('流内 error 事件：半截气泡被丢弃，降级后只留一条完整题目', async () => {
+test('流内 error 事件：不留在半截题面，降级后只留一条完整题目', async () => {
   const store = resetStore()
   const sse = createSseHarness()
   globalThis.fetch = async () => sse.response
 
   const promise = store.submitAnswer('回答')
 
+  sse.push(stageFrame('正在生成问题'))
   sse.push(deltaFrame('半截题'))
-  await waitFor(() => store.messages.some((item) => item.content === '半截题'))
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  assert.equal(aiMessages(store).length, 1, '生成期间不应出现半截题面')
   sse.push('event: error\ndata: {"detail":"LLM provider error: timeout"}\n\n')
   sse.close()
 
@@ -218,7 +224,7 @@ test('流内 error 事件：半截气泡被丢弃，降级后只留一条完整�
 
   assert.equal(syncCalls, 1)
   const messages = aiMessages(store)
-  assert.equal(messages.length, 2, '半截气泡必须被移除')
+  assert.equal(messages.length, 2)
   assert.equal(messages[1].content, '降级后的题目：说说你的项目')
   assert.equal(messages.some((item) => item.content === '半截题'), false)
 })
@@ -231,7 +237,7 @@ test('流没有 done 就结束：按中断处理并回落同步接口', async ()
   const promise = store.submitAnswer('回答')
   sse.push(stageFrame('正在生成问题'))
   sse.push(deltaFrame('只出到一半'))
-  await waitFor(() => store.messages.some((item) => item.content === '只出到一半'))
+  await new Promise((resolve) => setTimeout(resolve, 30))
   sse.close()
 
   await promise

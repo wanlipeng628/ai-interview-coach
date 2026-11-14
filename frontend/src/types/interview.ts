@@ -7,6 +7,8 @@ export interface InterviewMessage {
   questionNo?: number
   createdAt: string
   streaming?: boolean
+  /** 新到题目播放一次打字机（服务端已定稿，动画只是观感） */
+  animate?: boolean
 }
 
 export interface AnsweredQuestion {
