@@ -27,6 +27,16 @@ AI Interview Coach 是一个面向 Java 开发者的 AI 模拟面试陪练系统
 - 复盘生成失败不影响主流程：报告读取自带规则模板兜底（评价/要点/答案），不依赖实时 AI 调用
 - LLM API 限流（429）时自动指数退避重试，仍失败则走兜底，绝不阻塞用户请求
 
+### 出题质量控制（重复题 / 一次问两问）
+
+面试官问得不专业是用户当场就能察觉的硬伤，但它经常在自动化指标里显示为 0。四层防线：prompt 硬约束 → 规则检测 → 重生成一次 → 兜底（静态题库 / 保留原题）。
+
+- **重复题**：出题时除了最近 6 轮上下文，另带一份「已问过的全部问题」清单；字面判重阈值降到 0.35，只有明确重复才重生成，其余靠清单在生成阶段预防
+- **一次问两问**：识别「一个问号串两个并列疑问」，并排除是非式铺场景和正反面对称两种合法单问
+- **验证不看计数器**：用 192 条人工盲评标注回归，当前命中 14/14、误报 0；计数器口径为 0 不代表人工口径为 0
+
+细节、历史数据与限制：[`docs/question-quality.md`](docs/question-quality.md)
+
 ### 移动端适配策略
 
 - 桌面端（≥1024px）保持改造前像素级一致，移动端适配全部收敛在 ≤1023px 媒体查询内
@@ -184,6 +194,11 @@ LLM_BASE_URL=https://token.sensenova.cn/v1
 LLM_MODEL=deepseek-v4-flash
 LLM_TEMPERATURE=0.7
 LLM_TIMEOUT_SECONDS=60
+# 只控制出题链路的 thinking（enabled / disabled），复盘链路始终开思考。
+# disabled 首 token 约 0.6s，enabled 约 2.8s；人工盲评测不出质量差异，见 docs/question-quality.md
+LLM_QUESTION_THINKING=enabled
+# 字面判重阈值（相邻两字 Jaccard），默认 0.35；调低前先用历史会话量误杀
+QUESTION_DUPLICATE_THRESHOLD=0.35
 ```
 
 注意：真实的 `.env` 文件、数据库密码和大模型 API Key 不要提交到 GitHub。
