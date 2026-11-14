@@ -117,6 +117,18 @@ _SENTENCE_END_PATTERN = re.compile(r"^([^。！!？?\n]{1,40}[。！!])\s*")
 _SMALL_TALK_PATTERN = re.compile(r"(?:和|跟|与|同)[你您](?:聊|谈)聊?")
 
 
+# 「哪 + 量词」的疑问形式：哪条记录 / 哪次故障 / 哪一层 / 哪家。
+# 固定词表盖不全量词组合，用模式兜住（AIC-85 线上实测：「对应哪条业务数据」漏检）。
+_WHICH_MEASURE_PATTERN = re.compile(r"哪[条次块层家位名项门只批组张步轮]")
+
+
+def _clause_asks(clause: str) -> bool:
+    """该分句是不是在提问（含疑问标志词或「哪 + 量词」）。"""
+    return any(marker in clause for marker in _INTERROGATIVE_MARKERS) or bool(
+        _WHICH_MEASURE_PATTERN.search(clause)
+    )
+
+
 @dataclass(slots=True)
 class AnswerReview:
     evaluation: str
@@ -222,8 +234,7 @@ def detect_multi_question(question: str) -> bool:
     question_clauses = [
         clause
         for clause in clauses
-        if any(marker in clause for marker in _INTERROGATIVE_MARKERS)
-        and not _YESNO_SETUP_PATTERN.search(clause)
+        if _clause_asks(clause) and not _YESNO_SETUP_PATTERN.search(clause)
     ]
     if len(question_clauses) >= 2:
         # 正反两面的对照疑问算一个请求：「适合解决什么问题，不适合解决什么问题」
