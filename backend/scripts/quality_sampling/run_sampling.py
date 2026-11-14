@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import json
 import os
@@ -25,10 +26,11 @@ import statistics
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = SCRIPT_DIR.parents[1]
@@ -37,7 +39,10 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.application.interview.interview_service import InterviewService  # noqa: E402
-from app.infrastructure.agent.interview_agent import InterviewerAgent  # noqa: E402
+from app.infrastructure.agent.interview_agent import (  # noqa: E402
+    InterviewerAgent,
+    detect_multi_question,
+)
 from app.infrastructure.llm.openai_compatible_client import OpenAICompatibleClient  # noqa: E402
 from app.shared.config import settings  # noqa: E402
 
@@ -62,7 +67,10 @@ SAMPLE_FIELDS = [
     "raw_output",
     "question",
     "sanitize_truncated",
+    "multi_question_detected",
+    "multi_question_final",
     "regen_triggered",
+    "regen_reason",
     "regen_success",
     "fallback_hit",
     "parse_failed",
@@ -76,7 +84,7 @@ SAMPLE_FIELDS = [
     "resume_text",
 ]
 
-EMPTY_QUESTION_DEFAULT = "请介绍一个你最近项目里最有挑战的问题，以及你是怎么解决的？"
+EMPTY_QUESTION_DEFAULT = "请介绍一个你最近项目里最有挑战的问题，说说你当时是怎么解决的？"
 
 # README 里写死的生产模型。与当前 env 不一致时脚本会拦下，避免悄悄产出不可外推的样本。
 PRODUCTION_MODEL = "deepseek-flash"
@@ -151,6 +159,18 @@ def default_out_dir() -> Path:
     return SCRIPT_DIR / "out" / f"aic80-{stamp}"
 
 
+# 出题链路在 AIC-82 改成异步流式后，AsyncOpenAI 连接池绑定单个事件循环。
+# 跑批本身是同步的，这里复用一个常驻 loop 驱动协程，避免每次 asyncio.run() 换 loop。
+_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+def run_coro(coro):
+    global _LOOP
+    if _LOOP is None:
+        _LOOP = asyncio.new_event_loop()
+    return _LOOP.run_until_complete(coro)
+
+
 # --------------------------------------------------------------------------- #
 # LLM 调用层
 # --------------------------------------------------------------------------- #
@@ -179,13 +199,13 @@ class RecordingClient:
         self.last = CallRecord(thinking_mode, total_ms, total_ms, text)
         return text
 
-    def chat_stream(
+    async def achat_stream(
         self, messages: list[dict[str, str]], thinking_mode: str | None = None
-    ) -> Iterator[str]:
+    ) -> AsyncIterator[str]:
         start = time.perf_counter()
         first_token_ms: float | None = None
         parts: list[str] = []
-        for chunk in self._inner.chat_stream(messages, thinking_mode=thinking_mode):
+        async for chunk in self._inner.achat_stream(messages, thinking_mode=thinking_mode):
             if first_token_ms is None:
                 first_token_ms = (time.perf_counter() - start) * 1000
             parts.append(chunk)
@@ -218,11 +238,16 @@ class MockInterviewerClient:
         "简历里的秒杀链路，你怎么压测和定位瓶颈的？",
     ]
 
+    # AIC-83 的两问结构：只有一个问号，按问号截断碰不到
+    _MULTI_QUESTION = (
+        "请讲一下消息表从写入到补偿完成的完整流程，以及消费端如何保证消息不被重复消费？"
+    )
+
     def __init__(self) -> None:
         self.calls = 0
         self._index = 0
 
-    def _payload(self) -> str:
+    def _payload(self, *, is_regeneration: bool = False) -> str:
         from openai import APITimeoutError
         import httpx
 
@@ -234,9 +259,17 @@ class MockInterviewerClient:
         if index % 17 == 0:
             # 非 JSON，验证 parse_failed / 原文兜底
             return f"好的，我们继续聊下一个点（mock 非 JSON 输出 #{index}）"
+        if is_regeneration:
+            # 重生成请求：只返回 {"question": ...}，返回干净的单问，验证重生成成功分支
+            question = self._QUESTIONS[(self._index + 5) % len(self._QUESTIONS)]
+            self._index += 1
+            return json.dumps({"question": question}, ensure_ascii=False)
         question = self._QUESTIONS[self._index % len(self._QUESTIONS)]
         self._index += 1
-        if index % 11 == 0:
+        if index % 13 == 0:
+            # 一次问两问，验证 multi_question 检测 → 重生成分支
+            question = self._MULTI_QUESTION
+        elif index % 11 == 0:
             # 故意重复上一题，验证去重 → 重生成分支
             question = self._QUESTIONS[(self._index - 2) % len(self._QUESTIONS)]
         decision = "end" if index % 53 == 0 else "continue"
@@ -246,16 +279,21 @@ class MockInterviewerClient:
             ensure_ascii=False,
         )
 
-    def chat(self, messages: list[dict[str, str]], thinking_mode: str | None = None) -> str:
-        return self._payload()
+    @staticmethod
+    def _is_regeneration_request(messages: list[dict[str, str]]) -> bool:
+        last = messages[-1].get("content", "") if messages else ""
+        return "原来的问题" in last or "重复的问题" in last
 
-    def chat_stream(
+    def chat(self, messages: list[dict[str, str]], thinking_mode: str | None = None) -> str:
+        return self._payload(is_regeneration=self._is_regeneration_request(messages))
+
+    async def achat_stream(
         self, messages: list[dict[str, str]], thinking_mode: str | None = None
-    ) -> Iterator[str]:
+    ) -> AsyncIterator[str]:
         text = self._payload()
         step = max(1, len(text) // 3)
         for start in range(0, len(text), step):
-            time.sleep(0.001)
+            await asyncio.sleep(0.001)
             yield text[start : start + step]
 
 
@@ -325,7 +363,10 @@ class Turn:
     retried: bool
     parse_failed: bool
     sanitize_truncated: bool | None
+    multi_question_detected: bool = False
+    multi_question_final: bool | None = None
     regen_triggered: bool = False
+    regen_reason: str | None = None
     regen_success: bool | None = None
     fallback_hit: bool = False
 
@@ -353,7 +394,7 @@ def raw_question_field(agent: InterviewerAgent, raw_output: str) -> str | None:
     return None
 
 
-def generate_turn(
+async def generate_turn(
     *,
     agent: InterviewerAgent,
     service: InterviewService,
@@ -377,7 +418,7 @@ def generate_turn(
         client.reset()
         emitted = False
         try:
-            stream = agent.generate_next_question_stream(
+            stream = agent.agenerate_next_question_stream(
                 job_role=scene["job_role"],
                 round_no=round_no,
                 duration_minutes=duration_minutes,
@@ -387,12 +428,16 @@ def generate_turn(
                 resume_text=scene["resume_text"],
                 history=history,
             )
-            for event in stream:
-                if event["type"] == "delta":
-                    emitted = True
-                elif event["type"] == "done":
-                    decision = event["decision"]
-                    break
+            try:
+                async for event in stream:
+                    if event["type"] == "delta":
+                        emitted = True
+                    elif event["type"] == "done":
+                        decision = event["decision"]
+                        break
+            finally:
+                # 拿到 done 就 break，异步生成器必须显式关闭，否则退出时告警
+                await stream.aclose()
             if decision is None:
                 raise RuntimeError("LLM stream ended without done event")
             break
@@ -400,7 +445,7 @@ def generate_turn(
             if emitted or attempt >= len(retry_backoff):
                 raise
             last_error = exc
-            time.sleep(retry_backoff[attempt])
+            await asyncio.sleep(retry_backoff[attempt])
 
     if decision is None:
         raise last_error or RuntimeError("LLM generation failed")
@@ -427,28 +472,47 @@ def generate_turn(
         retried=attempts > 1,
         parse_failed=parse_failed,
         sanitize_truncated=truncated,
+        multi_question_detected=bool(decision.multi_question_detected),
     )
 
-    # 重复检测 → 重生成 → 静态兜底，与 InterviewService.submit_answer_stream 完全一致
+    # 重复检测 / 一次问两问 → 重生成一次 → 静态兜底，与 InterviewService._repair_question 一致
     if turn.decision != "end" and turn.question:
-        if service._is_repeated_question(turn.question, history):  # noqa: SLF001
+        repeated = service._is_repeated_question(turn.question, history)  # noqa: SLF001
+        multi_question = detect_multi_question(turn.question)
+        turn.multi_question_detected = turn.multi_question_detected or multi_question
+        if repeated or multi_question:
             turn.regen_triggered = True
+            turn.regen_reason = (
+                InterviewerAgent.REGENERATE_REASON_DUPLICATE
+                if repeated
+                else InterviewerAgent.REGENERATE_REASON_MULTI_QUESTION
+            )
             regenerated = agent.regenerate_question_avoiding_history(
                 job_role=scene["job_role"],
                 direction=scene["direction"],
                 interviewer_mode=scene["mode"],
                 duplicated_question=turn.question,
                 history=history,
+                reason=turn.regen_reason,
             )
-            if regenerated and not service._is_repeated_question(regenerated, history):  # noqa: SLF001
+            regenerated_ok = bool(regenerated) and not service._is_repeated_question(  # noqa: SLF001
+                regenerated, history
+            )
+            if regenerated_ok and detect_multi_question(regenerated):
+                regenerated_ok = False
+            if regenerated_ok:
                 turn.question = regenerated
                 turn.regen_success = True
-            else:
+            elif repeated:
                 turn.question = service._build_non_repeated_question(  # noqa: SLF001
                     scene["direction"], history
                 )
                 turn.regen_success = False
                 turn.fallback_hit = True
+            else:
+                # 多问重生成仍不合格：保留原题，不阻塞用户（AIC-83）
+                turn.regen_success = False
+        turn.multi_question_final = detect_multi_question(turn.question)
 
     return turn
 
@@ -595,7 +659,8 @@ class Runner:
             scene = dict(scene)
             scene["resume_text"] = self.resumes[scene["resume_id"]]
             self._run_single_samples(scene, group, batch_id)
-            self._run_full_session(scene, group, batch_id)
+            if not self.args.only_single:
+                self._run_full_session(scene, group, batch_id)
 
         finished = utc_now()
         print(f"[{utc_iso(finished)}] batch {batch_id} / {group} 结束", flush=True)
@@ -634,7 +699,10 @@ class Runner:
             "raw_output": turn.raw_output,
             "question": turn.question,
             "sanitize_truncated": turn.sanitize_truncated,
+            "multi_question_detected": turn.multi_question_detected,
+            "multi_question_final": turn.multi_question_final,
             "regen_triggered": turn.regen_triggered,
+            "regen_reason": turn.regen_reason,
             "regen_success": turn.regen_success,
             "fallback_hit": turn.fallback_hit,
             "parse_failed": turn.parse_failed,
@@ -656,15 +724,17 @@ class Runner:
         session_id: str,
         group: str,
     ) -> Turn:
-        return generate_turn(
-            agent=self.agent,
-            service=self.service,
-            client=self.client,
-            scene=scene,
-            history=history,
-            round_no=round_no,
-            elapsed_minutes=(round_no - 1) * self.args.elapsed_step_minutes,
-            duration_minutes=self.duration_minutes,
+        return run_coro(
+            generate_turn(
+                agent=self.agent,
+                service=self.service,
+                client=self.client,
+                scene=scene,
+                history=history,
+                round_no=round_no,
+                elapsed_minutes=(round_no - 1) * self.args.elapsed_step_minutes,
+                duration_minutes=self.duration_minutes,
+            )
         )
 
     def _run_single_samples(self, scene: dict[str, Any], group: str, batch_id: str) -> None:
@@ -1047,7 +1117,7 @@ def write_readme(out_dir: Path, args: argparse.Namespace) -> None:
             f"{fmt_ms(statistics.mean(all_rows) if all_rows else None)} |"
         )
     add("")
-    add("首 token = `chat_stream` 吐出的第一个内容 chunk（thinking 的 reasoning token 不计入）。")
+    add("首 token = `achat_stream` 吐出的第一个内容 chunk（thinking 的 reasoning token 不计入）。")
     add("")
 
     add("## 9. 质量否决项相关计数")
@@ -1056,7 +1126,11 @@ def write_readme(out_dir: Path, args: argparse.Namespace) -> None:
     add("|------|----------|---------|")
     for label, predicate in (
         ("JSON 解析失败（parse_failed）", lambda item: item.get("parse_failed")),
+        ("模型输出含多问（multi_question_detected）", lambda item: item.get("multi_question_detected") is True),
+        ("最终题面仍含多问（multi_question_final）", lambda item: item.get("multi_question_final") is True),
         ("重复检测触发（regen_triggered）", lambda item: item.get("regen_triggered")),
+        ("其中因多问触发（regen_reason=MULTI_QUESTION）",
+         lambda item: item.get("regen_reason") == "MULTI_QUESTION"),
         ("重生成成功（regen_success）", lambda item: item.get("regen_success") is True),
         ("静态兜底命中（fallback_hit）", lambda item: item.get("fallback_hit")),
         ("疑似被截断（sanitize_truncated=true）", lambda item: item.get("sanitize_truncated") is True),
@@ -1078,7 +1152,10 @@ def write_readme(out_dir: Path, args: argparse.Namespace) -> None:
     add("- `sample_id` / `session_id`：`<场景>-<会话序号>-<组>`，`sample_id` 再加 `-<轮次>`。序号 01-03 是单题采样，第 04 个是完整面试。")
     add("- `scored`：完整面试第 1 轮为 `false`（与单题采样重复计数），其余为 `true`。")
     add("- `sanitize_truncated`：对比「清洗前的问题字段」与「最终 question」，若 `_normalize_single_question()` 在第一个 `？` 或分隔符处切掉了尾部则为 `true`；无法判断时为 `null`。")
-    add("- `regen_success`：未触发重复检测时为 `null`。")
+    add("- `multi_question_detected`：模型原始输出里是否含多问（AIC-83 口径，含「，以及……如何」这种只有一个问号的两问结构），按截断前的题面判定。")
+    add("- `multi_question_final`：最终下发的 `question` 是否仍含多问；为 `true` 说明重生成一次后仍未修好，已按约定保留原题。")
+    add("- `regen_reason`：`DUPLICATE`（重复题）/ `MULTI_QUESTION`（一次问两问）；未触发时为 `null`。")
+    add("- `regen_success`：未触发重生成时为 `null`；`false` 且 `regen_reason=MULTI_QUESTION` 表示保留原题。")
     add("- `first_token_ms` / `total_ms`：只计成功那一次调用；重试耗时不计入。")
     add("- `raw_output`：模型原始输出（sanitize 之前）。`question`：sanitize 之后的最终题面。")
     add("")
@@ -1109,6 +1186,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scenes", default="", help="逗号分隔的场景号，如 S01,S07；默认全部 12 个")
     parser.add_argument("--out-dir", default="", help="输出目录，默认 scripts/quality_sampling/out/aic80-<UTC 时间>")
     parser.add_argument("--single-samples", type=int, default=3, help="每个场景单题采样次数（默认 3）")
+    parser.add_argument("--only-single", action="store_true",
+                        help="只跑单题采样（AIC-83 复测：12 场景 × 3 × 2 组 = 72 题），不跑完整面试")
     parser.add_argument("--rounds", type=int, default=5, help="完整面试轮次（默认 5）")
     parser.add_argument("--elapsed-step-minutes", type=int, default=5,
                         help="模拟时钟每轮递增分钟数（默认 5）")

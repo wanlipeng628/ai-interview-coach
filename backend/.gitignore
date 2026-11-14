@@ -16,3 +16,6 @@ dist/
 build/
 *.egg-info/
 logs/
+
+# AIC-81 抽检脚本的跑批产物（README 已声明不入库）
+scripts/quality_sampling/out/

@@ -7,6 +7,43 @@ from typing import Any
 from app.infrastructure.llm.openai_compatible_client import OpenAICompatibleClient
 from app.shared.config import settings
 
+# 第二疑问分句的引导词：模型常用它们把两问连成一句，句末却只有一个问号。
+# 例：「…请讲一下消息表从写入到补偿完成的完整流程，以及消费端如何保证消息不被重复消费？」
+_SECOND_QUESTION_CONNECTORS = (
+    "以及",
+    "同时",
+    "另外",
+    "此外",
+    "顺便",
+    "还有",
+    "并且",
+    "再者",
+    "然后",
+    "接着",
+    "再",
+    "又",
+)
+
+# 疑问标志词：命中才说明第二个分句是在提问，而不是在补充说明。
+_INTERROGATIVE_MARKERS = (
+    "怎么",
+    "如何",
+    "为什么",
+    "为何",
+    "是什么",
+    "什么",
+    "哪些",
+    "哪种",
+    "哪一",
+    "是否",
+    "有没有",
+    "能否",
+    "会不会",
+    "多少",
+)
+
+_CLAUSE_SPLIT_PATTERN = re.compile(r"[，,；;、]")
+
 
 @dataclass(slots=True)
 class AnswerReview:
@@ -23,6 +60,54 @@ class InterviewerDecision:
     question: str | None
     reason: str | None = None
     answer_review: AnswerReview | None = None
+    # 模型原始输出里是否含多问（AIC-83 口径：叫「模型输出含多问」，不叫「被截断」）
+    multi_question_detected: bool = False
+
+
+@dataclass(slots=True)
+class QuestionSanitization:
+    question: str
+    multi_question_detected: bool = False
+
+
+def _first_question_mark_index(text: str) -> int:
+    indexes = [index for index in (text.find("？"), text.find("?")) if index >= 0]
+    return min(indexes) if indexes else -1
+
+
+def detect_multi_question(question: str) -> bool:
+    """判断题面里是否其实塞了两个问题。
+
+    AIC-83：关思考时模型常把两问用「，以及……怎么/如何」连成一句，句末只有一个问号，
+    按问号截断碰不到。这里只识别、不改写——截掉后半句会留下一个没有疑问词的残句，
+    比一次问两问更糟。命中后由调用方决定是否重生成一次。
+    """
+    text = re.sub(r"\s+", " ", question or "").strip()
+    if not text:
+        return False
+
+    first_mark = _first_question_mark_index(text)
+    if first_mark >= 0 and _first_question_mark_index(text[first_mark + 1 :]) >= 0:
+        # 两个问号：本身就是两问
+        return True
+
+    for clause in _CLAUSE_SPLIT_PATTERN.split(text):
+        clause = clause.strip()
+        for connector in _SECOND_QUESTION_CONNECTORS:
+            if not clause.startswith(connector):
+                continue
+            rest = clause[len(connector) :]
+            if any(marker in rest for marker in _INTERROGATIVE_MARKERS):
+                return True
+            break
+
+    # 没有逗号分隔的变体：「……的完整流程以及消费端如何保证……？」
+    inline = re.search(
+        r"(?:以及|同时|另外|此外|顺便|还有|并且)[^，,。；;？！?]{0,40}?"
+        r"(?:怎么|如何|为什么|为何|是什么|哪些|哪种|是否|有没有|能否|多少)",
+        text,
+    )
+    return inline is not None
 
 
 class InterviewerAgent:
@@ -61,9 +146,9 @@ class InterviewerAgent:
 4. 表现较强时逐步提高深度，基础较弱时回到更基础、更具体的问题。
 
 提问规则，必须严格遵守：
-1. 每轮只能问一个问题。
+1. 每轮只能问一个问题，question 句末只能有一个问号。
 2. question 字段只能包含一个单一问题，不要给标准答案，不要评价候选人。
-3. 不要把多个问题合并成一个问题。
+3. 不要把多个问题合并成一个问题。禁止用「以及 / 同时 / 另外 / 顺便 / 还有 / 并且」在同一个句子里追加第二个问题——「，以及……怎么 / 如何 / 为什么……？」这种结构即使句末只有一个问号，也是两个问题。
 4. 不要使用“分别说说、另外、还有、同时、比如 A/B/C、从实现和原理两个方面”等方式拼接多个问题。
 5. 不要让候选人同时回答实现、原理、优化、排查、对比多个方向。
 6. 如果要深入，只选择候选人回答里最关键的一个点继续问。
@@ -72,6 +157,7 @@ class InterviewerAgent:
 9. 同一项目可以继续深挖，但必须往更深的层次走，不能换个说法回到同一个问题上。如果简历上的项目细节已经挖得差不多，不要再回头重问旧知识点，改为切换考察维度：项目实现细节 → 设计取舍与权衡 → 线上故障与排查 → 技术广度 → 反问环节。
 10. 切换维度后，问题必须仍然锚定在候选人的具体项目、技术选型或他刚才的回答上。禁止问脱离候选人经历的通用八股题（例如直接问“G1 怎么划分堆内存”）。要问通用知识，也必须挂到他的场景里，比如“你那个导入服务用的什么收集器，为什么没选 G1”。
 11. question 里不得出现“回答不错、回答不完整、你刚才没有说清楚、建议你”等评价或指导。
+12. 开场轮（第 1 轮）只请候选人做自我介绍，不要在同一题里再叠加「重点讲项目 / 展开技术栈 / 讲讲最难的点」等追加要求。
 
 你必须只输出严格 JSON，不要输出 Markdown。JSON 格式：
 {
@@ -120,6 +206,16 @@ class InterviewerAgent:
             pacing = f"已超时长上限约 {elapsed_minutes - duration_minutes} 分钟：材料够了就收尾，不够就继续问"
         else:
             pacing = f"距时长上限还有约 {duration_minutes - elapsed_minutes} 分钟"
+        # 开场轮：只让候选人做自我介绍。AIC-80 复测里开场题最容易叠加
+        # 「并重点讲讲项目 / 说说技术栈」这类追加要求，变成一次问两问。
+        is_opening = round_no <= 1 and not any(
+            item.get("role") == "AI_INTERVIEWER" for item in history
+        )
+        opening_hint = (
+            "\n本轮是开场题：只请候选人做自我介绍，不要在同一题里再要求讲项目、技术栈或难点。\n"
+            if is_opening
+            else ""
+        )
         return [
             {"role": "system", "content": self.SYSTEM_PROMPT},
             {
@@ -136,8 +232,10 @@ class InterviewerAgent:
                     f"{self._format_history(history)}\n\n"
                     "已问过的问题（全部，不得重复）：\n"
                     f"{self._format_asked_questions(list(asked_questions))}\n\n"
+                    f"{opening_hint}"
                     "请基于候选人最近一轮回答，先在心里评估回答质量，再输出下一步决策。\n"
-                    "再次强调：question 只能是下一个单一面试问题，不能包含任何评价或指导。"
+                    "再次强调：question 只能是下一个单一面试问题，不能包含任何评价或指导，"
+                    "也不能用「以及 / 同时 / 另外 / 顺便」追加第二问。"
                 ),
             },
         ]
@@ -222,6 +320,9 @@ class InterviewerAgent:
         decision = self._parse_decision(full_content, latest_answer=latest_answer)
         yield {"type": "done", "decision": decision}
 
+    REGENERATE_REASON_DUPLICATE = "DUPLICATE"
+    REGENERATE_REASON_MULTI_QUESTION = "MULTI_QUESTION"
+
     def regenerate_question_avoiding_history(
         self,
         job_role: str,
@@ -229,29 +330,51 @@ class InterviewerAgent:
         interviewer_mode: str | None,
         duplicated_question: str,
         history: list[dict[str, str]],
+        reason: str = REGENERATE_REASON_DUPLICATE,
     ) -> str | None:
         asked_questions = [
             item.get("content", "").strip()
             for item in history
             if item.get("role") == "AI_INTERVIEWER" and item.get("content", "").strip()
         ]
+        if reason == self.REGENERATE_REASON_MULTI_QUESTION:
+            opening = (
+                "你刚才生成的问题里同时包含了两个问题，违反「每轮只能问一个问题」的要求，"
+                "需要把它改写成只问一个问题的版本。\n"
+            )
+            offending = f"原来的问题：{duplicated_question}\n\n"
+            requirements = (
+                "要求：\n"
+                "1. 保留原问题的主考点，只保留其中一个追问点；不要用「以及 / 同时 / 另外 / 顺便」拼接第二问。\n"
+                "2. 改写后全文只能有一个疑问句，句末只能有一个问号。\n"
+                "3. 新问题必须避开已经问过的问题和相同知识点。\n"
+                "4. 新问题仍然要符合当前候选人的简历、项目经历、最近回答和面试方向。\n"
+                "5. 不要评价候选人，不要给答案。\n"
+                "6. 只输出严格 JSON：{\"question\":\"新的单一问题\"}"
+            )
+        else:
+            opening = "你刚才生成的问题与历史问题重复或高度相似，需要重新生成一个新的面试问题。\n"
+            offending = f"重复的问题：{duplicated_question}\n\n"
+            requirements = (
+                "要求：\n"
+                "1. 新问题必须避开所有已经问过的问题和相同知识点。\n"
+                "2. 新问题仍然要符合当前候选人的简历、项目经历、最近回答和面试方向。\n"
+                "3. 只问一个单一问题，不要评价候选人，不要给答案。\n"
+                "4. 只输出严格 JSON：{\"question\":\"新的单一问题\"}"
+            )
         messages = [
             {"role": "system", "content": self.SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
-                    "你刚才生成的问题与历史问题重复或高度相似，需要重新生成一个新的面试问题。\n"
+                    f"{opening}"
                     f"面试岗位：{job_role}\n"
                     f"面试方向：{direction or 'FULL_MOCK'}\n"
                     f"面试官模式：{interviewer_mode or 'NORMAL'}\n"
-                    f"重复的问题：{duplicated_question}\n\n"
+                    f"{offending}"
                     "已经问过的问题：\n"
                     f"{self._format_asked_questions(asked_questions)}\n\n"
-                    "要求：\n"
-                    "1. 新问题必须避开所有已经问过的问题和相同知识点。\n"
-                    "2. 新问题仍然要符合当前候选人的简历、项目经历、最近回答和面试方向。\n"
-                    "3. 只问一个单一问题，不要评价候选人，不要给答案。\n"
-                    "4. 只输出严格 JSON：{\"question\":\"新的单一问题\"}"
+                    f"{requirements}"
                 ),
             },
         ]
@@ -411,16 +534,20 @@ class InterviewerAgent:
             decision = "continue"
 
         question = payload.get("question")
+        multi_question_detected = False
         if question is not None:
-            question = self._sanitize_question(str(question)) or None
+            sanitized = self._sanitize_question_with_flags(str(question))
+            question = sanitized.question or None
+            multi_question_detected = sanitized.multi_question_detected
 
         if decision != "end" and not question:
-            question = "请介绍一个你最近项目里最有挑战的问题，以及你是怎么解决的？"
+            question = "请介绍一个你最近项目里最有挑战的问题，说说你当时是怎么解决的？"
 
         return InterviewerDecision(
             decision=decision,
             question=question,
             reason=payload.get("reason"),
+            multi_question_detected=multi_question_detected,
         )
 
     def _parse_answer_review(
@@ -487,11 +614,19 @@ class InterviewerAgent:
         return text
 
     def _sanitize_question(self, question: str) -> str:
+        return self._sanitize_question_with_flags(question).question
+
+    def _sanitize_question_with_flags(self, question: str) -> QuestionSanitization:
         normalized = re.sub(r"\s+", " ", question).strip()
         for pattern in self.REVIEW_LEAK_PATTERNS:
             normalized = re.sub(pattern, "", normalized)
         normalized = self._remove_review_keywords_prefix(normalized)
-        return self._normalize_single_question(normalized)
+        # 多问判定放在按问号截断之前：两个问号的题会被截掉后半句，
+        # 但「模型输出含多问」这个事实仍要记下来（AIC-80 口径）。
+        return QuestionSanitization(
+            question=self._normalize_single_question(normalized),
+            multi_question_detected=detect_multi_question(normalized),
+        )
 
     def _remove_review_keywords_prefix(self, question: str) -> str:
         keywords = ["回答不错", "回答不完整", "不够完整", "比较笼统", "没有说清楚", "需要补充"]
@@ -512,7 +647,7 @@ class InterviewerAgent:
         if not normalized:
             return normalized
 
-        question_mark_index = self._first_question_mark_index(normalized)
+        question_mark_index = _first_question_mark_index(normalized)
         if question_mark_index >= 0:
             return normalized[: question_mark_index + 1]
 
@@ -524,8 +659,7 @@ class InterviewerAgent:
         return normalized
 
     def _first_question_mark_index(self, text: str) -> int:
-        indexes = [index for index in (text.find("？"), text.find("?")) if index >= 0]
-        return min(indexes) if indexes else -1
+        return _first_question_mark_index(text)
 
     def _latest_candidate_answer(self, history: list[dict[str, str]]) -> str | None:
         for item in reversed(history):

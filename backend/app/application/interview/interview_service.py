@@ -35,7 +35,11 @@ from app.domain.interview.entities import (
 )
 from app.domain.interview.repositories import InterviewRepository
 from app.domain.interview.services import InterviewQuestionPolicy
-from app.infrastructure.agent.interview_agent import InterviewerAgent, InterviewerDecision
+from app.infrastructure.agent.interview_agent import (
+    InterviewerAgent,
+    InterviewerDecision,
+    detect_multi_question,
+)
 from app.shared.config import settings
 
 RESUME_CONTEXT_PREFIX = "RESUME_CONTEXT"
@@ -214,22 +218,15 @@ class InterviewService:
         next_question = decision.question
         if not next_question:
             raise RuntimeError("LLM did not return next question")
-        if self._is_repeated_question(next_question, history_with_answer):
-            regenerated_question = interviewer_agent.regenerate_question_avoiding_history(
-                job_role=session.job_role,
-                direction=session.direction,
-                interviewer_mode=session.interviewer_mode,
-                duplicated_question=next_question,
-                history=history_with_answer,
-            )
-            if regenerated_question and not self._is_repeated_question(
-                regenerated_question, history_with_answer
-            ):
-                next_question = regenerated_question
-            else:
-                next_question = self._build_non_repeated_question(
-                    session.direction, history_with_answer
-                )
+        next_question = self._repair_question(
+            agent=interviewer_agent,
+            question=next_question,
+            history=history_with_answer,
+            job_role=session.job_role,
+            direction=session.direction,
+            interviewer_mode=session.interviewer_mode,
+            session_id=session_id,
+        )
 
         # LLM 成功了才把用户回答和下一题一起落库。
         # 消息顺序与之前一致：先用户回答，再下一题。
@@ -422,27 +419,18 @@ class InterviewService:
             yield self._sse_event("error", {"detail": "LLM did not return next question"})
             return
 
-        # 重复题兜底：与同步路径一致的逻辑
-        if self._is_repeated_question(next_question, history_with_answer):
-            regenerated_question = await self._run_blocking(
-                interviewer_agent.regenerate_question_avoiding_history,
-                job_role=session.job_role,
-                direction=session.direction,
-                interviewer_mode=session.interviewer_mode,
-                duplicated_question=next_question,
-                history=history_with_answer,
-            )
-            if regenerated_question and not self._is_repeated_question(
-                regenerated_question, history_with_answer
-            ):
-                next_question = regenerated_question
-                # 重新生成的问题一次性发送（兜底场景，不要求流式）
-                yield self._sse_event("delta", {"text": regenerated_question})
-            else:
-                next_question = self._build_non_repeated_question(
-                    session.direction, history_with_answer
-                )
-                yield self._sse_event("delta", {"text": next_question})
+        # 重复题 / 一次问两问兜底：与同步路径一致的逻辑。
+        # 不改写已吐出的 delta：done 事件里的 next_question 会让前端整条替换。
+        next_question = await self._run_blocking(
+            self._repair_question,
+            agent=interviewer_agent,
+            question=next_question,
+            history=history_with_answer,
+            job_role=session.job_role,
+            direction=session.direction,
+            interviewer_mode=session.interviewer_mode,
+            session_id=session_id,
+        )
 
         # LLM 成功后才落库：与同步路径一致的推迟落库策略
         await self._run_blocking(
@@ -979,6 +967,66 @@ class InterviewService:
             for item in history
             if item.get("role") == "AI_INTERVIEWER" and item.get("content")
         ]
+
+    def _repair_question(
+        self,
+        *,
+        agent: InterviewerAgent,
+        question: str,
+        history: list[dict[str, str]],
+        job_role: str,
+        direction: str | None,
+        interviewer_mode: str | None,
+        session_id: str,
+    ) -> str:
+        """收口出题违规：重复题、一次问两问。
+
+        只重生成一次，不循环（AIC-83）。重复题兜底到静态题库；多问重生成仍不合格时
+        保留原题——宁可让用户看到一道两问的题，也不要因为兜底把这一轮卡住。
+        """
+        repeated = self._is_repeated_question(question, history)
+        multi_question = detect_multi_question(question)
+        if not repeated and not multi_question:
+            return question
+
+        logger = logging.getLogger(__name__)
+        if multi_question:
+            logger.info(
+                "multi-question output detected session=%s question=%s", session_id, question
+            )
+
+        regenerated_question = agent.regenerate_question_avoiding_history(
+            job_role=job_role,
+            direction=direction,
+            interviewer_mode=interviewer_mode,
+            duplicated_question=question,
+            history=history,
+            reason=(
+                InterviewerAgent.REGENERATE_REASON_DUPLICATE
+                if repeated
+                else InterviewerAgent.REGENERATE_REASON_MULTI_QUESTION
+            ),
+        )
+        regenerated_ok = bool(regenerated_question) and not self._is_repeated_question(
+            str(regenerated_question), history
+        )
+        if regenerated_ok and detect_multi_question(str(regenerated_question)):
+            regenerated_ok = False
+        if regenerated_ok:
+            return str(regenerated_question)
+
+        if repeated:
+            logger.warning(
+                "regenerated question still repeated, fallback to static bank session=%s",
+                session_id,
+            )
+            return self._build_non_repeated_question(direction, history)
+
+        logger.warning(
+            "multi-question regeneration still invalid, keep original question session=%s",
+            session_id,
+        )
+        return question
 
     def _is_repeated_question(self, question: str, history: list[dict[str, str]]) -> bool:
         normalized_question = self._normalize_question_text(question)
