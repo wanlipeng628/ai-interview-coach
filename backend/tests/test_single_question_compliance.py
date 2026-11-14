@@ -36,7 +36,23 @@ SINGLE_QUESTIONS = [
         "你用 SELECT ... FOR UPDATE 锁的是假期配置表里该员工的那行锚点记录，"
         "如果这个员工在配置表里还没有对应行，这条 SELECT 会锁住什么？"
     ),
+]
+
+# AIC-85：这句按 D4 锚点算两个并列疑问（问了收集器，又问为何不选 G1），
+# 从 SINGLE_QUESTIONS 移过来，不再当作合法单问的反例。
+TWO_QUESTIONS_WITHOUT_CONNECTOR = [
     "你在导入服务里用的什么垃圾收集器，为什么没选 G1？",
+    "你提到重试设了次数上限来避免死循环，这个上限具体是怎么定的，超过上限之后走的那条兜底路径在线上是怎么处理的？",
+    "你在客服知识库问答项目里提到混合召回加 rerank 把准确率从 61% 提到 79%，这个 rerank 具体用的是什么模型、怎么和向量与 BM25 的召回结果融合的？",
+    "这次拆分里，哪个领域边界最难划清，最后是靠什么把它定下来的？",
+    "你把检索出来的片段拼进 prompt 时，一次会放几条片段，按什么依据决定放哪些进去？",
+    "那次消息堆积的根因是什么，你们最后定位到哪个环节？",
+    "你秒杀链路里 Kafka 消费之后异步落库用到线程池了吗，那个线程池的核心参数是基于什么定的？",
+]
+
+# 是非式铺场景的单问：第一分句在铺前提，不是真的要问是或否。
+SETUP_SINGLE_QUESTIONS = [
+    "你提到按事务边界来划分服务，那在实际拆分过程中，有没有遇到过某个聚合既想放在订单域又想放在履约域、跨服务强一致无法避免的情况，你当时是怎么处理的？",
 ]
 
 
@@ -125,6 +141,17 @@ def _service_with(agent: ScriptedAgent) -> tuple[InterviewService, InterviewSess
 
 @pytest.mark.parametrize("question", SINGLE_QUESTIONS)
 def test_single_question_is_not_flagged(question: str) -> None:
+    assert detect_multi_question(question) is False
+
+
+@pytest.mark.parametrize("question", TWO_QUESTIONS_WITHOUT_CONNECTOR)
+def test_two_questions_without_connector_are_flagged(question: str) -> None:
+    """一个问号里串两个并列疑问（AIC-85 盲评里判 3 分的实际形态）。"""
+    assert detect_multi_question(question) is True
+
+
+@pytest.mark.parametrize("question", SETUP_SINGLE_QUESTIONS)
+def test_yesno_setup_is_not_flagged(question: str) -> None:
     assert detect_multi_question(question) is False
 
 

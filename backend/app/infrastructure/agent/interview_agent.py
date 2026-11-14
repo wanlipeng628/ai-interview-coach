@@ -38,12 +38,27 @@ _INTERROGATIVE_MARKERS = (
     "什么",
     "哪些",
     "哪种",
+    "哪个",
     "哪一",
+    "哪几",
     "是否",
     "有没有",
     "能否",
     "会不会",
+    "能不能",
     "多少",
+    "几条",
+    "几个",
+    "几种",
+    "多大",
+    "吗",
+    "呢",
+)
+
+# 是非式铺场景的分句：「有没有遇到过…的情况」「是否出现过…的问题」。
+# 这类分句在铺前提，不是真的要候选人回答是或否，不能当第二问计数。
+_YESNO_SETUP_PATTERN = re.compile(
+    r"(?:有没有|是否|会不会).{0,40}(?:遇到过|出现过|碰到过|做过|情况|场景|时候)"
 )
 
 _CLAUSE_SPLIT_PATTERN = re.compile(r"[，,；;、]")
@@ -95,10 +110,6 @@ _SECOND_REQUEST_VERBS = (
     "说明",
     "阐述",
 )
-
-# 第二分句的主语代词：「…输入是什么、它又是怎么决定下一步的？」这类两问没有连接词，
-# 只有第二分句以代词回指上一个疑问时才算数（见 detect_multi_question）。
-_CLAUSE_SUBJECT_PRONOUNS = ("它", "他", "她", "这", "那", "该", "其")
 
 _SENTENCE_END_PATTERN = re.compile(r"^([^。！!？?\n]{1,40}[。！!])\s*")
 
@@ -161,6 +172,18 @@ def _drop_leading_greeting_sentences(text: str) -> str:
     return remainder
 
 
+def _is_negated_restatement(first: str, second: str) -> bool:
+    """第二分句是不是第一分句加了否定前缀的复述（「适合…，不适合…」）。
+
+    这是同一个请求的正反两面，不是两次提问，不该计为第二问。
+    """
+    if not second.startswith(("不", "没", "无需", "不必")):
+        return False
+    core = second.lstrip("不没无需必").rstrip("吗呢？? ")
+    grams = {core[i : i + 4] for i in range(len(core) - 3)}
+    return any(gram in first for gram in grams) if grams else False
+
+
 def detect_multi_question(question: str) -> bool:
     """判断题面里是否其实塞了两个问题。
 
@@ -192,17 +215,23 @@ def detect_multi_question(question: str) -> bool:
                 return True
             break
 
-    # 无连接词的并列两问：「…输入是什么、它又是怎么决定下一步的？」
-    # 只在第二分句用代词回指、且前一分句自己也在提问时才算——否则
-    # 「…，这个切换动作是根据哪些信号判定的？」这类单问会被误判。
-    for previous, current in zip(clauses, clauses[1:], strict=False):
-        if not current.startswith(_CLAUSE_SUBJECT_PRONOUNS):
-            continue
-        if not any(marker in current for marker in _INTERROGATIVE_MARKERS):
-            continue
-        if not any(marker in previous for marker in _INTERROGATIVE_MARKERS):
-            continue
-        return True
+    # 无连接词的并列两问：「…这个上限具体是怎么定的，超过上限之后…怎么处理的？」
+    # 判据：两个及以上分句各自带疑问标志词。
+    # 排除是非式铺场景的分句——否则「…有没有遇到过 X 的情况，你当时是怎么处理的？」
+    # 这种合法单问会被误判（AIC-85 盲评里它被判 5 分）。
+    question_clauses = [
+        clause
+        for clause in clauses
+        if any(marker in clause for marker in _INTERROGATIVE_MARKERS)
+        and not _YESNO_SETUP_PATTERN.search(clause)
+    ]
+    if len(question_clauses) >= 2:
+        # 正反两面的对照疑问算一个请求：「适合解决什么问题，不适合解决什么问题」
+        if not (
+            len(question_clauses) == 2
+            and _is_negated_restatement(question_clauses[0], question_clauses[1])
+        ):
+            return True
 
     # 没有逗号分隔的变体：「……的完整流程以及消费端如何保证……？」
     inline = re.search(
