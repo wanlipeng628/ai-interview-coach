@@ -44,6 +44,41 @@ _INTERROGATIVE_MARKERS = (
 
 _CLAUSE_SPLIT_PATTERN = re.compile(r"[，,；;、]")
 
+# 请求/疑问标志词：句子里出现任意一个，才认为这句话是在提问或提要求。
+# 用于无问号题面的切句：模型常先打招呼（「你好，我是今天的面试官。」）再提问题，
+# 盲目按第一个「。」截断会把真正的问题整段切掉。
+_REQUEST_MARKERS = (
+    "请",
+    "介绍",
+    "说说",
+    "讲讲",
+    "谈谈",
+    "聊聊",
+    "描述",
+    "解释",
+    "举例",
+    "展开",
+    "分享",
+    *_INTERROGATIVE_MARKERS,
+)
+
+# 开场问候/寒暄用语；命中且该句没有任何请求/疑问标志时，视为可丢弃的前缀句。
+_GREETING_MARKERS = (
+    "你好",
+    "您好",
+    "哈喽",
+    "嗨",
+    "很高兴",
+    "欢迎参加",
+    "欢迎来到",
+    "面试官",
+)
+
+_SENTENCE_END_PATTERN = re.compile(r"^([^。！!？?\n]{1,40}[。！!])\s*")
+
+# 寒暄里的「和你聊聊 / 跟您谈谈」不是提问，检查请求标志词前先摘掉。
+_SMALL_TALK_PATTERN = re.compile(r"(?:和|跟|与|同)[你您](?:聊|谈)聊?")
+
 
 @dataclass(slots=True)
 class AnswerReview:
@@ -73,6 +108,31 @@ class QuestionSanitization:
 def _first_question_mark_index(text: str) -> int:
     indexes = [index for index in (text.find("？"), text.find("?")) if index >= 0]
     return min(indexes) if indexes else -1
+
+
+def _drop_leading_greeting_sentences(text: str) -> str:
+    """丢掉题面前面的纯问候句，避免无问号时被「。」截断成只剩一句问候。
+
+    例：「你好，我是今天的面试官。请先做一个自我介绍。」→「请先做一个自我介绍。」
+    只丢弃同时满足「含问候词」且「不含请求/疑问标志」的句子，最多两句；
+    全部丢完会空时保持原样，交给上层兜底。
+    """
+    remainder = text
+    for _ in range(2):
+        match = _SENTENCE_END_PATTERN.match(remainder)
+        if not match:
+            break
+        sentence = match.group(1)
+        if not any(marker in sentence for marker in _GREETING_MARKERS):
+            break
+        probe = _SMALL_TALK_PATTERN.sub("", sentence)
+        if any(marker in probe for marker in _REQUEST_MARKERS):
+            break
+        rest = remainder[match.end() :].strip()
+        if not rest:
+            break
+        remainder = rest
+    return remainder
 
 
 def detect_multi_question(question: str) -> bool:
@@ -650,6 +710,10 @@ class InterviewerAgent:
         question_mark_index = _first_question_mark_index(normalized)
         if question_mark_index >= 0:
             return normalized[: question_mark_index + 1]
+
+        # 无问号时下面会按第一个「。」截断；先去掉纯问候前缀，否则
+        # 「你好，我是今天的面试官。请先做一个自我介绍。」会只剩问候语。
+        normalized = _drop_leading_greeting_sentences(normalized)
 
         separators = ["；", ";", "。", "\n"]
         cut_points = [normalized.find(item) for item in separators if normalized.find(item) >= 0]

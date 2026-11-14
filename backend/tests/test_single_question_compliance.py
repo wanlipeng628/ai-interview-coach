@@ -153,6 +153,28 @@ def test_two_question_marks_are_truncated_but_still_flagged() -> None:
     assert sanitized.multi_question_detected is True
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # 开场题没有问号时，模型会先打招呼再提要求；不能把问题切掉只剩问候
+        ("你好，我是今天的面试官。请先做一个自我介绍。", "请先做一个自我介绍"),
+        ("你好，我是本次面试官。请先做一个简短的自我介绍。", "请先做一个简短的自我介绍"),
+        (
+            "周晴你好，很高兴今天能和你聊聊。请先做一个简单的自我介绍吧。",
+            "请先做一个简单的自我介绍吧",
+        ),
+        # 没有问候前缀时行为不变
+        ("请先做一个自我介绍。", "请先做一个自我介绍"),
+        # 含请求标志的寒暄句不能整句丢掉
+        ("你好，我们聊聊你最近做的项目。", "你好，我们聊聊你最近做的项目"),
+    ],
+)
+def test_greeting_prefix_keeps_the_real_question(raw: str, expected: str) -> None:
+    agent = InterviewerAgent.__new__(InterviewerAgent)
+
+    assert agent._sanitize_question(raw) == expected
+
+
 def test_parse_decision_reports_multi_question_flag() -> None:
     agent = InterviewerAgent.__new__(InterviewerAgent)
     raw = (
