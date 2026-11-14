@@ -22,7 +22,11 @@ _SECOND_QUESTION_CONNECTORS = (
     "接着",
     "再",
     "又",
+    "并",
 )
+
+# 「并」也是连接词，但「并发 / 并行 / 并非」是词内用法，不能当第二问的引导词。
+_PSEUDO_CONNECTOR_PREFIXES = ("发", "行", "非")
 
 # 疑问标志词：命中才说明第二个分句是在提问，而不是在补充说明。
 _INTERROGATIVE_MARKERS = (
@@ -73,6 +77,28 @@ _GREETING_MARKERS = (
     "欢迎来到",
     "面试官",
 )
+
+# 祈使型第二问的动词：模型用连接词追加要求时，第二分句常常没有疑问词。
+# 例：「请先做一个自我介绍，以及介绍一下你负责的项目。」
+# 不含「请」——子串匹配会把「…两个请求同时打进来」这类正文误判成请求。
+_SECOND_REQUEST_VERBS = (
+    "介绍",
+    "说说",
+    "讲讲",
+    "谈谈",
+    "聊聊",
+    "描述",
+    "解释",
+    "举例",
+    "展开",
+    "分享",
+    "说明",
+    "阐述",
+)
+
+# 第二分句的主语代词：「…输入是什么、它又是怎么决定下一步的？」这类两问没有连接词，
+# 只有第二分句以代词回指上一个疑问时才算数（见 detect_multi_question）。
+_CLAUSE_SUBJECT_PRONOUNS = ("它", "他", "她", "这", "那", "该", "其")
 
 _SENTENCE_END_PATTERN = re.compile(r"^([^。！!？?\n]{1,40}[。！!])\s*")
 
@@ -151,15 +177,32 @@ def detect_multi_question(question: str) -> bool:
         # 两个问号：本身就是两问
         return True
 
-    for clause in _CLAUSE_SPLIT_PATTERN.split(text):
-        clause = clause.strip()
+    clauses = [clause.strip() for clause in _CLAUSE_SPLIT_PATTERN.split(text)]
+    for clause in clauses:
         for connector in _SECOND_QUESTION_CONNECTORS:
             if not clause.startswith(connector):
                 continue
             rest = clause[len(connector) :]
+            if connector == "并" and rest.startswith(_PSEUDO_CONNECTOR_PREFIXES):
+                break
+            # 有疑问词是第二问；没有疑问词但接着提要求（「以及介绍一下…」）也是第二问。
             if any(marker in rest for marker in _INTERROGATIVE_MARKERS):
                 return True
+            if any(verb in rest for verb in _SECOND_REQUEST_VERBS):
+                return True
             break
+
+    # 无连接词的并列两问：「…输入是什么、它又是怎么决定下一步的？」
+    # 只在第二分句用代词回指、且前一分句自己也在提问时才算——否则
+    # 「…，这个切换动作是根据哪些信号判定的？」这类单问会被误判。
+    for previous, current in zip(clauses, clauses[1:], strict=False):
+        if not current.startswith(_CLAUSE_SUBJECT_PRONOUNS):
+            continue
+        if not any(marker in current for marker in _INTERROGATIVE_MARKERS):
+            continue
+        if not any(marker in previous for marker in _INTERROGATIVE_MARKERS):
+            continue
+        return True
 
     # 没有逗号分隔的变体：「……的完整流程以及消费端如何保证……？」
     inline = re.search(

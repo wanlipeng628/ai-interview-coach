@@ -144,9 +144,46 @@ def git_short_sha() -> str:
         return "unknown"
 
 
+def git_worktree_state() -> str:
+    """HEAD + 工作区状态。
+
+    只在 HEAD 上记一版是不够的：AIC-83 那次跑批时工作区有未提交改动，
+    样本里写的 `git:5578d2f` 复现不出实测行为。带未提交改动时标 `+dirty:<diff sha>`，
+    同一个 commit 的两次脏工作区也能区分开。
+    """
+    sha = git_short_sha()
+    try:
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=REPO_DIR,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=True,
+        ).stdout.strip()
+        if not status:
+            return sha
+        diff = subprocess.run(
+            ["git", "diff", "HEAD"],
+            cwd=REPO_DIR,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=True,
+        ).stdout
+        digest = hashlib.sha256((status + "\n" + diff).encode("utf-8")).hexdigest()[:8]
+        return f"{sha}+dirty:{digest}"
+    except Exception:  # noqa: BLE001 - 取不到就标 unknown，不阻断跑批
+        return f"{sha}+unknown"
+
+
 def prompt_version() -> str:
     sha = hashlib.sha256(InterviewerAgent.SYSTEM_PROMPT.encode("utf-8")).hexdigest()[:12]
-    return f"git:{git_short_sha()};interviewer_prompt:sha256-{sha}"
+    return f"git:{git_worktree_state()};interviewer_prompt:sha256-{sha}"
 
 
 def simulator_prompt_version(text: str) -> str:

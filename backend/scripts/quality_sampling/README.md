@@ -54,6 +54,8 @@ python scripts/quality_sampling/run_sampling.py --group all
 - `run_meta.json` — 两组的起止时间、模型、prompt 版本等
 - `README.md` — 输入包 7.3 要求的跑批说明（时间窗、模型实际值、prompt 版本、枚举映射、模拟器参数、重试记录、每场模拟器平均回答长度）
 
+`prompt_version` 形如 `git:5578d2f;interviewer_prompt:sha256-996e94d55bc2`。如果跑批时工作区有未提交改动，会记成 `git:5578d2f+dirty:1a2b3c4d;…`——这种样本不能用 HEAD 复现，引用数据时要连 `+dirty` 一起标注。
+
 ## 已知口径偏差
 
 完整清单写在每次运行的 `out/aic80-<UTC>/README.md` 第 11 节。最重要的一条：产品 `start_interview()` 的第 1 题是静态模板（自我介绍），LLM 第一次真正出题是线上的第 2 轮；本脚本按抽检标准 §2.1 的口径，把「无历史上下文时 LLM 生成的第一题」记为第 1 轮，因此这批样本的第 1 轮不等同于线上用户看到的第一句话。

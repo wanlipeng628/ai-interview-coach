@@ -221,6 +221,7 @@ class InterviewService:
         next_question = self._repair_question(
             agent=interviewer_agent,
             question=next_question,
+            multi_question_detected=decision.multi_question_detected,
             history=history_with_answer,
             job_role=session.job_role,
             direction=session.direction,
@@ -425,6 +426,7 @@ class InterviewService:
             self._repair_question,
             agent=interviewer_agent,
             question=next_question,
+            multi_question_detected=decision.multi_question_detected,
             history=history_with_answer,
             job_role=session.job_role,
             direction=session.direction,
@@ -978,14 +980,18 @@ class InterviewService:
         direction: str | None,
         interviewer_mode: str | None,
         session_id: str,
+        multi_question_detected: bool = False,
     ) -> str:
         """收口出题违规：重复题、一次问两问。
 
         只重生成一次，不循环（AIC-83）。重复题兜底到静态题库；多问重生成仍不合格时
         保留原题——宁可让用户看到一道两问的题，也不要因为兜底把这一轮卡住。
+
+        `multi_question_detected` 是出题时在**截断前**算好的标记：两个问号的输出
+        已被 `_normalize_single_question()` 截成单问，这里再检测已经看不出来了。
         """
         repeated = self._is_repeated_question(question, history)
-        multi_question = detect_multi_question(question)
+        multi_question = multi_question_detected or detect_multi_question(question)
         if not repeated and not multi_question:
             return question
 

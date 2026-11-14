@@ -132,6 +132,54 @@ def test_connector_second_question_is_detected() -> None:
     assert detect_multi_question(TWO_QUESTIONS_IN_ONE) is True
 
 
+def test_inline_connector_without_comma_is_detected() -> None:
+    """没有逗号分隔的变体：靠 inline 分支命中。"""
+    question = "请你讲一下消息表写入到补偿的完整流程以及消费端如何保证消息不被重复消费？"
+
+    assert detect_multi_question(question) is True
+
+
+def test_connector_plus_imperative_second_question_is_detected() -> None:
+    """连接词后面没有疑问词、只是又提了一个要求，也算两问。"""
+    assert detect_multi_question("请先做一个自我介绍，以及介绍一下你负责的项目。") is True
+    assert detect_multi_question("请先做一个自我介绍，并介绍一下你负责的项目。") is True
+
+
+def test_concurrent_word_is_not_treated_as_connector() -> None:
+    """「并发 / 并行」是词内用法，不能当成第二问的「并」。"""
+    assert detect_multi_question("你能讲讲并发写冲突是怎么处理的？") is False
+
+
+def test_pronoun_led_second_question_is_detected() -> None:
+    """没有连接词的并列两问：第二分句用代词回指，且前一分句也在提问。
+
+    样本 S05-04-disabled-4 的原题，旧检测器漏检（QA B2）。
+    """
+    question = (
+        "你提到失败会走重规划节点、最多重试两次，"
+        "那这个重规划节点的输入是什么、它又是怎么决定下一步该走哪个节点的？"
+    )
+
+    assert detect_multi_question(question) is True
+
+
+def test_pronoun_clause_without_previous_question_is_not_flagged() -> None:
+    """第二分句用代词回指但前一分句没有提问时，仍是一问，不能误判。"""
+    question = (
+        "你在模型网关里做「主模型超时自动切备用」，这个切换动作具体是根据哪些信号判定触发的？"
+    )
+
+    assert detect_multi_question(question) is False
+
+
+def test_content_qualifier_is_not_flagged() -> None:
+    """同一请求的内容补充（D4=4）不该触发重生成，否则白烧一次调用。"""
+    assert (
+        detect_multi_question("请先做一个自我介绍，简单介绍一下你的背景和目前的工作情况。")
+        is False
+    )
+
+
 def test_single_question_is_normalized_unchanged() -> None:
     agent = InterviewerAgent.__new__(InterviewerAgent)
     question = "你能讲一下 HashMap 在 JDK 1.8 中 put 一个元素的大致过程吗？"
@@ -238,10 +286,11 @@ def test_opening_hint_disappears_after_first_round() -> None:
 # === 重生成一层 ===
 
 def test_multi_question_triggers_single_regeneration() -> None:
+    """题面本身就含两问：靠检测器命中，不依赖 flag。"""
     agent = ScriptedAgent(
         first_question=TWO_QUESTIONS_IN_ONE,
         regenerated_question="请讲一下消息表从写入到补偿完成的完整流程？",
-        multi_question_detected=True,
+        multi_question_detected=False,
     )
     service, _ = _service_with(agent)
 
@@ -250,6 +299,37 @@ def test_multi_question_triggers_single_regeneration() -> None:
     assert result.next_question == "请讲一下消息表从写入到补偿完成的完整流程？"
     assert len(agent.regenerate_calls) == 1
     assert agent.regenerate_calls[0]["reason"] == InterviewerAgent.REGENERATE_REASON_MULTI_QUESTION
+
+
+def test_two_question_marks_flag_triggers_regeneration_after_truncation() -> None:
+    """两个问号的输出被截断成单问后，仍要按出题时的 flag 重生成一次（QA B1）。"""
+    agent = ScriptedAgent(
+        # 服务层拿到的是截断后的题面，这时已经检测不出多问了
+        first_question="你做过哪些优化？",
+        regenerated_question="请讲讲你在订单服务里做过的一次性能优化。",
+        multi_question_detected=True,
+    )
+    service, _ = _service_with(agent)
+
+    result = service.submit_answer(1, "test-session", SubmitAnswerRequest(answer="我的回答"))
+
+    assert result.next_question == "请讲讲你在订单服务里做过的一次性能优化。"
+    assert len(agent.regenerate_calls) == 1
+    assert agent.regenerate_calls[0]["reason"] == InterviewerAgent.REGENERATE_REASON_MULTI_QUESTION
+
+
+def test_clean_question_without_flag_does_not_regenerate() -> None:
+    agent = ScriptedAgent(
+        first_question="请讲讲你在订单服务里做过的一次性能优化。",
+        regenerated_question="不会用到",
+        multi_question_detected=False,
+    )
+    service, _ = _service_with(agent)
+
+    result = service.submit_answer(1, "test-session", SubmitAnswerRequest(answer="我的回答"))
+
+    assert result.next_question == "请讲讲你在订单服务里做过的一次性能优化。"
+    assert agent.regenerate_calls == []
 
 
 def test_multi_question_regeneration_failure_keeps_original_without_retry() -> None:
