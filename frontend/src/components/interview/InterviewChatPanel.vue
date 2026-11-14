@@ -1,6 +1,11 @@
 <template>
-  <section ref="panelRef" class="chat-panel">
-    <InterviewMessageItem v-for="message in messages" :key="message.id" :message="message" />
+  <section ref="panelRef" class="chat-panel" @scroll.passive="onScroll">
+    <InterviewMessageItem
+      v-for="message in messages"
+      :key="message.id"
+      :message="message"
+      @grow="followBottom"
+    />
   </section>
 </template>
 
@@ -16,10 +21,34 @@ const props = defineProps<{
 
 const panelRef = ref<HTMLElement>()
 
+// 是否贴在底部：只在贴底时跟随新内容；用户往上翻看历史时不拽回去。
+// 用滞回区间而不是单一阈值：内容增长的那一瞬间会短暂拉开几十像素，
+// 单一阈值会把这个瞬间判成「用户翻走了」，跟随就断了。
+const stickToBottom = ref(true)
+const STICK_ENTER_PX = 8
+const STICK_LEAVE_PX = 120
+
+const onScroll = () => {
+  const el = panelRef.value
+  if (!el) return
+  const gap = el.scrollHeight - el.scrollTop - el.clientHeight
+  if (gap <= STICK_ENTER_PX) stickToBottom.value = true
+  else if (gap >= STICK_LEAVE_PX) stickToBottom.value = false
+  // 中间区域保持原状态：既可能是增长瞬间，也可能是小幅滚动，不为难用户
+}
+
+const followBottom = async () => {
+  // 等 DOM 更新完再滚：子组件发出 grow 时，气泡高度还没被浏览器重排
+  await nextTick()
+  const el = panelRef.value
+  if (!el || !stickToBottom.value) return
+  el.scrollTop = el.scrollHeight
+}
+
 const scrollToBottom = async () => {
   await nextTick()
-  if (!panelRef.value) return
-  panelRef.value.scrollTop = panelRef.value.scrollHeight
+  stickToBottom.value = true
+  followBottom()
 }
 
 watch(

@@ -17,19 +17,26 @@ const props = defineProps<{
   message: InterviewMessage
 }>()
 
+// 打字机逐字摸高气泡时通知父级：聊天区的滚动往往只看数据变化，
+// 看不到子组件内部的高度增长，窄屏上最后几行会落在可视区之外。
+const emit = defineEmits<{
+  (event: 'grow'): void
+}>()
+
 // 题面在服务端已经定稿，这里的打字机只是观感——显示的内容不会在中途改变。
-// 总时长封顶，字数多的题靠加快节奏，不靠拉长等待。
+// 用经过时间推导进度（而非每个字排一个 setTimeout）：定时器有最小间隔和调度延迟，
+// 逐字排会让长题远远超过目标时长。
 const TYPING_TOTAL_MS = 700
 const TYPING_MAX_STEP_MS = 20
 
 const typing = ref(false)
 const revealed = ref(props.message.content)
-let timer: number | null = null
+let rafId: number | null = null
 
 function stopTyping() {
-  if (timer !== null) {
-    window.clearTimeout(timer)
-    timer = null
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId)
+    rafId = null
   }
   typing.value = false
 }
@@ -39,29 +46,36 @@ function finishTyping() {
   if (!typing.value) return
   stopTyping()
   revealed.value = props.message.content
+  emit('grow')
 }
 
 function startTyping() {
   const text = props.message.content
   if (!text) return
-  const step = Math.min(TYPING_MAX_STEP_MS, TYPING_TOTAL_MS / text.length)
-  let index = 0
+  // 短题按字数跑，长题封顶 700ms
+  const duration = Math.min(TYPING_TOTAL_MS, text.length * TYPING_MAX_STEP_MS)
+  const startedAt = performance.now()
   typing.value = true
   revealed.value = ''
-  const tick = () => {
-    index += 1
-    revealed.value = text.slice(0, index)
-    if (index >= text.length) {
+  const tick = (now: number) => {
+    const ratio = Math.min(1, (now - startedAt) / duration)
+    const count = Math.max(1, Math.round(text.length * ratio))
+    revealed.value = text.slice(0, count)
+    emit('grow')
+    if (ratio >= 1) {
       stopTyping()
       return
     }
-    timer = window.setTimeout(tick, step)
+    rafId = requestAnimationFrame(tick)
   }
-  tick()
+  rafId = requestAnimationFrame(tick)
 }
 
 onMounted(() => {
-  if (props.message.animate) startTyping()
+  if (!props.message.animate) return
+  // 系统开了减少动画就直接给全文
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  startTyping()
 })
 
 onBeforeUnmount(stopTyping)
