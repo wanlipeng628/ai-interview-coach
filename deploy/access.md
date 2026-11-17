@@ -161,10 +161,60 @@ ssh ... "printf '%s' <sha> > /opt/ai-coach/REVISION"
 | 构建 OOM | `free -h`；swap 是否还在（`deploy/init-swap.sh`） |
 | 流式无响应 | nginx 是否 `proxy_buffering off`；`curl -N` 直连后端看是否有事件 |
 | 连不上 SSH | 用完整密钥、系统 OpenSSH；部署密钥**不能**拿 shell（正常现象） |
+| 自己连不上，之前还好 | 大概率被 fail2ban 封了；换网络或控制台 VNC 登录后 unban |
 | 远端脚本报 `$'\r'` | 忘了 `sed -i "s/\r$//"` |
 | 远端脚本莫名少字母 r | 用了 `tr -d "\r"`，换成 `sed` |
 
-## 9. 想更省事：加一条 ssh 别名
+## 9. 安全基线（2026-11-14 加固后）
+
+**仓库是 public 的。** `deploy/` 下的文档里有服务器 IP、账号 `ubuntu`、密钥文件名，
+但没有任何凭据——私钥、密码、API Key 都不在仓库里（已用 `git log -p --all` 搜过全历史，
+`.env` 也被 `.gitignore` 挡着）。真正的防线是「关掉密码登录」，不是「别让人知道 IP」：
+这台机器一周被尝试登录上千次，IP 早已不是秘密。
+
+### sshd
+
+配置文件：`/etc/ssh/sshd_config.d/99-hardening.conf`（读在 cloud-init 的 `50-cloud-init.conf` 之后）。
+
+```
+PermitRootLogin prohibit-password   # root 只能用密钥，不能用密码
+PasswordAuthentication no           # 关掉密码登录
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+PermitEmptyPasswords no
+MaxAuthTries 4
+```
+
+查看有效值（不是看配置文件，要看最终生效值）：
+
+```bash
+sudo sshd -T | grep -E "^(permitrootlogin|passwordauthentication|maxauthtries) "
+```
+
+### fail2ban
+
+配置：`/etc/fail2ban/jail.d/sshd.local`，读 journald，**10 分钟内 5 次失败封 1 小时**。
+
+```bash
+sudo fail2ban-client status sshd          # 看失败数、当前封禁 IP
+sudo fail2ban-client set sshd unbanip 1.2.3.4    # 误封了就解
+sudo fail2ban-client set sshd banip 1.2.3.4      # 手动封
+```
+
+钢丝上看，封禁在 nftables 里体现为 `set addr-set-sshd { elements = { ... } }`。
+
+> 密钥登录不会产生失败记录，所以**部署密钥（CI）不会被 fail2ban 封**。
+> 反过来：如果你用错密钥连续试 5 次，自己的 IP 会被封一小时。
+
+**被自己封了怎么办：** 换一个网络（手机热点）连，或从腾讯云控制台 VNC 登录后
+`sudo fail2ban-client set sshd unbanip <你的IP>`。
+
+### 还没做的
+
+- 云安全组没在此文档可验证（控制台看），建议只放行 22 / 80
+- `ufw` 没开（fail2ban 已足够应对 SSH 爆破，开 ufw 时注意别把 Docker 端口搞丢）
+
+## 10. 想更省事：加一条 ssh 别名
 
 `~/.ssh/config` 目前没有，加下面这段之后可以直接 `ssh aic`：
 
